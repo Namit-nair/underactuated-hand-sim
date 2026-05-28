@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """
-MuJoCo Simulation: Anthropomorphic Finger with Tendon Displacement Control
-===================================================================================
-This script models the anthropomorphic finger using a motor-position/tendon-displacement 
-architecture. Instead of artificially prescribing force, the actuator controls the 
-angle of a physical motor spool. As the spool rotates, it winds the tendon around itself, 
-creating a precise DeltaL = spool_radius * motor_angle relationship. 
+MuJoCo Simulation: Anthropomorphic Finger with Environmental Contact
+=====================================================================
+This script adds a rigid, fixed spherical obstacle to the direct tendon displacement
+control (DeltaL) finger simulation. 
 
-The tendon tension, and therefore the finger posture, emerges entirely passively from 
-the interplay of tendon displacement, joint stiffness, and physical routing.
+It is designed to study contact-constrained tendon redistribution and the passive,
+adaptive wrapping behavior characteristic of underactuated robotic fingers.
 
-Key Improvements over Direct Force Control:
--------------------------------------------
-1. Physical Accuracy: Matches real-world low-cost robotic hands which use position-controlled servos.
-2. Spool Physics: A dedicated rigid spool body wraps the tendon mathematically perfectly.
-3. Natural Tension Emergence: Force is not artificially enforced; it arises as a reaction to displacement.
+Key Concepts:
+-------------
+1. Fixed Environmental Obstacle: A rigid red sphere is attached to the world frame.
+   It acts as a mechanical barrier in the finger's flexion sweep.
+2. Bilateral Contact Dynamics: High-fidelity stable contact properties are configured on
+   both the obstacle and phalanx geoms to minimize penetration, avoid jitter, and prevent explosive forces.
+3. Elegant Collision Filtering: Using MuJoCo bitmasks (contype and congroup), we filter out
+   internal self-collisions (overlaps at joint pivots) and isolate pure finger-obstacle contact.
+4. Passive Adaptive Wrap: When a phalanx makes contact with the sphere, its motion is constrained.
+   Continued tendon displacement DeltaL passively redistributes tension to the remaining free joints,
+   forcing them to curl further and adaptively wrap the obstacle.
 """
 
 import time
@@ -29,11 +33,11 @@ import matplotlib.pyplot as plt
 SCALE = 1.0
 
 # ======================================================================
-# Programmatic Position Setpoint (User-Editable)
+# Programmatic Displacement Setpoint (User-Editable)
 # ======================================================================
-# The single control setpoint: Spool Motor Angle in Radians.
-# Edit this value manually to change the target motor position (0.0 to 4.5).
-MOTOR_ANGLE_SETPOINT = 0.0
+# The single control setpoint: Tendon Displacement (DeltaL) in meters.
+# Edit this value manually to set the target displacement (0.0 to 0.04 m).
+DELTA_L_SETPOINT = 0.0
 
 # Anatomical Link Lengths derived from SCALE
 L_PROX = 0.050 * SCALE
@@ -45,12 +49,13 @@ R_PROX = 0.010 * SCALE
 R_MID  = 0.008 * SCALE
 R_DIST = 0.006 * SCALE
 
-# Realistic human phalanx masses (applied explicitly to geoms)
+# Realistic human phalanx masses
 M_PROX = 0.01550 * SCALE**3
 M_MID  = 0.00679 * SCALE**3
 M_DIST = 0.00391 * SCALE**3
 
 # Passive Joint Mechanics (Stiffness & Damping per-joint)
+# Highly optimized staggered hierarchy to guarantee proximal-first (MCP) curling
 MCP_STIFFNESS = 0.15            # N·m/rad (compliant base joint, flexes first)
 PIP_STIFFNESS = 0.40            # N·m/rad (intermediate stiffness)
 DIP_STIFFNESS = 0.50            # N·m/rad (highest stiffness, resists early curling)
@@ -59,12 +64,8 @@ MCP_DAMPING = 0.03              # N·m·s/rad (stabilizing viscous damping)
 PIP_DAMPING = 0.05              # N·m·s/rad
 DIP_DAMPING = 0.08              # N·m·s/rad
 
-# Servo & Spool Calibration
-SPOOL_RADIUS_MM = 10.0          # Winch spool radius in mm
-MAX_MOTOR_ANGLE_RAD = 4.5       # Maximum spool rotation allowed (radians) (~258 degrees)
-MOTOR_KP = 100.0                # Position actuator proportional gain (stiffness of motor)
-
-# Tendon Properties
+# Tendon Physical Properties
+TENDON_STIFFNESS = 5000.0       # N/m
 TENDON_DAMPING = 1.0            # Viscous damping on the tendon itself for stabilization
 
 # Anatomical Hinge Joint Limits (Degrees of curling flexion towards +X)
@@ -73,36 +74,42 @@ MCP_LIMIT_MAX = 90.0            # Max MCP flexion limit
 PIP_LIMIT_MAX = 100.0           # Max PIP flexion limit
 DIP_LIMIT_MAX = 90.0            # Max DIP flexion limit
 
-SPOOL_RADIUS_M = SPOOL_RADIUS_MM / 1000.0
+# Derived Tendon Routing Coordinates
+TENDON_ORIGIN_X = 0.015 * SCALE
+TENDON_ORIGIN_Z = -0.030 * SCALE
 
-# Derived Tendon Routing Coordinates (Scalable, close to palm-side surfaces)
-# The spool is placed slightly behind the MCP to route the tendon naturally.
-SPOOL_POS_X = 0.015 * SCALE
-SPOOL_POS_Z = -0.050 * SCALE
-
-# Proximal phalanx guide channels (slightly close to surface R_PROX)
 MCP_ENTRY_X = 0.012 * SCALE
 MCP_ENTRY_Z = 0.007 * SCALE
 MCP_EXIT_X = 0.010 * SCALE
 MCP_EXIT_Z = L_PROX * 0.78
 
-# Middle phalanx guide channels (slightly close to surface R_MID)
 PIP_ENTRY_X = 0.009 * SCALE
 PIP_ENTRY_Z = 0.010 * SCALE
 PIP_EXIT_X = 0.008 * SCALE
 PIP_EXIT_Z = L_MID * 0.76
 
-# Distal phalanx guide channel & terminal anchor
 DIP_ENTRY_X = 0.007 * SCALE
 DIP_ENTRY_Z = 0.008 * SCALE
 DIP_ANCHOR_X = 0.006 * SCALE
 DIP_ANCHOR_Z = L_DIST * 0.8
 
 # ======================================================================
+# Obstacle Parameters
+# ======================================================================
+OBSTACLE_POS = "0.08 0 0.15"
+OBSTACLE_RADIUS = "0.01"
+OBSTACLE_RGBA = "1.0 0.2 0.2 1.0"
+
+# High-stability contact parameters (to prevent penetration, slipping, and high-frequency jitter)
+CONTACT_FRICTION = "1.5 0.01 0.001"
+CONTACT_SOLREF = "0.01 1"
+CONTACT_SOLIMP = "0.95 0.99 0.001"
+
+# ======================================================================
 # MJCF XML Model Definition
 # ======================================================================
 xml_content = f"""
-<mujoco model="anthropomorphic_underactuated_finger_displacement">
+<mujoco model="anthropomorphic_underactuated_finger_contact">
     <compiler angle="degree" coordinate="local"/>
     <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81">
         <flag energy="enable"/>
@@ -118,13 +125,16 @@ xml_content = f"""
         <material name="grid_floor" texture="grid" texrepeat="2 2" texuniform="true" reflectance="0.1"/>
         <material name="bone" rgba="0.6 0.8 1.0 0.45" shininess="0.9" specular="0.9"/>
         <material name="pivot" rgba="0.8 0.5 0.2 1.0" shininess="0.8" specular="0.8"/>
-        <material name="pulley" rgba="0.4 0.9 0.4 0.8" shininess="0.5" specular="0.5"/>
+        <material name="obstacle_mat" rgba="{OBSTACLE_RGBA}" shininess="0.6" specular="0.7"/>
     </asset>
 
     <default>
         <joint type="hinge" axis="0 1 0" pos="0 0 0" limited="true"
                springref="0" armature="0.001"/>
-        <geom type="cylinder" density="1000" material="bone"/>
+        <!-- Apply stable contact parameters and collision bitmasks to prevent internal finger self-collisions -->
+        <geom density="1000" material="bone"
+              friction="{CONTACT_FRICTION}" solref="{CONTACT_SOLREF}" solimp="{CONTACT_SOLIMP}"
+              contype="1" conaffinity="2"/>
         <site size="0.002" rgba="0.95 0.7 0.2 1"/>
     </default>
 
@@ -132,23 +142,22 @@ xml_content = f"""
         <light pos="1 1 3" dir="-0.3 -0.3 -1" castshadow="true"/>
         <light pos="-1 -1 2.5" dir="0.3 0.3 -1" castshadow="false"/>
 
-        <geom type="plane" size="3 3 0.1" material="grid_floor"/>
+        <geom type="plane" size="3 3 0.1" material="grid_floor" contype="0" conaffinity="0"/>
+
+        <!-- ===== Fixed Rigid Spherical Obstacle ===== -->
+        <!-- Placed directly in the world body so it remains completely fixed in space -->
+        <geom name="obstacle" type="sphere" size="{OBSTACLE_RADIUS}" pos="{OBSTACLE_POS}" material="obstacle_mat"
+              friction="{CONTACT_FRICTION}" solref="{CONTACT_SOLREF}" solimp="{CONTACT_SOLIMP}"
+              contype="2" conaffinity="1"/>
+        <!-- Spherical touch site to measure normal contact forces acting on the obstacle -->
+        <site name="obstacle_site" type="sphere" size="0.0125" pos="{OBSTACLE_POS}" rgba="0 0 0 0"/>
 
         <!-- ===== Anchor base (fixed to world, minimal cylindrical/pin style) ===== -->
         <body name="anchor" pos="0 0 0.1">
             <geom type="cylinder" size="0.002 {R_PROX * 1.5}" pos="0 0 0" euler="90 0 0" rgba="0.5 0.5 0.5 0.6"/>
 
-            <!-- ===== Motor Spool ===== -->
-            <!-- Located behind and below the MCP joint -->
-            <body name="spool" pos="{SPOOL_POS_X} 0 {SPOOL_POS_Z}">
-                <!-- Unconstrained hinge joint for the spool to rotate around Y -->
-                <joint name="spool_joint" type="hinge" axis="0 1 0" range="-15 15" stiffness="0" damping="0.01"/>
-                <!-- Spool wrap cylinder -->
-                <geom name="spool_geom" type="cylinder" size="{SPOOL_RADIUS_M} 0.005" euler="90 0 0" material="pulley"/>
-                <!-- Tendon tie-off point on the edge of the spool -->
-                <!-- As the spool rotates by angle theta, this site winds the tendon around the cylinder -->
-                <site name="spool_tie" pos="{SPOOL_RADIUS_M} 0 0"/>
-            </body>
+            <!-- Fixed Tendon Origin -->
+            <site name="tendon_origin" pos="{TENDON_ORIGIN_X} 0 {TENDON_ORIGIN_Z}"/>
 
             <!-- ===== MCP — Proximal phalanx ===== -->
             <body name="proximal" pos="0 0 0">
@@ -189,15 +198,10 @@ xml_content = f"""
         </body>
     </worldbody>
 
-    <!-- ===== Single flexor tendon: Spool wrap + Guide-site routing ===== -->
+    <!-- ===== Single flexor tendon: Guide-site routing with linear spring behavior ===== -->
     <tendon>
-        <spatial name="flexor" width="0.002" damping="{TENDON_DAMPING}" stiffness="5000" springlength="-1" rgba="0.95 0.25 0.25 1.0">
-            <!-- Tendon originates on the spool's edge -->
-            <site site="spool_tie"/>
-            <!-- Tendon wraps around the spool body mathematically perfectly -->
-            <geom geom="spool_geom"/>
-            
-            <!-- Tendon then routes through the finger's internal guides -->
+        <spatial name="flexor" width="0.002" damping="{TENDON_DAMPING}" stiffness="{TENDON_STIFFNESS}" springlength="-1" rgba="0.95 0.25 0.25 1.0">
+            <site site="tendon_origin"/>
             <site site="mcp_entry"/>
             <site site="mcp_exit"/>
             <site site="pip_entry"/>
@@ -207,13 +211,10 @@ xml_content = f"""
         </spatial>
     </tendon>
 
-    <!-- ===== Actuator: Position control on the Spool joint ===== -->
-    <!-- Positive rotation winds the tendon up. -->
+    <!-- ===== Actuator: Dummy actuator (gear=0) to expose a clean DeltaL slider in GUI ===== -->
     <actuator>
-        <position name="spool_motor" joint="spool_joint"
-                  ctrlrange="0 {MAX_MOTOR_ANGLE_RAD}"
-                  ctrllimited="true"
-                  kp="{MOTOR_KP}"/>
+        <motor name="tendon_displacement" tendon="flexor"
+               ctrlrange="0 0.04" ctrllimited="true" gear="0"/>
     </actuator>
 
     <!-- ===== Sensors ===== -->
@@ -223,6 +224,8 @@ xml_content = f"""
         <jointpos  name="pip_angle" joint="pip"/>
         <jointvel  name="pip_vel"   joint="pip"/>
         <jointpos  name="dip_angle" joint="dip"/>
+        <jointvel  name="dip_vel"   joint="dip"/>
+        <touch     name="obstacle_force" site="obstacle_site"/>
     </sensor>
 </mujoco>
 """
@@ -231,16 +234,18 @@ xml_content = f"""
 S_MCP_POS, S_MCP_VEL = 0, 1
 S_PIP_POS, S_PIP_VEL = 2, 3
 S_DIP_POS, S_DIP_VEL = 4, 5
+S_OBSTACLE_FORCE = 6
 
 def main():
     print("=" * 75)
-    print("  Anthropomorphic Tendon-Driven Finger (Displacement Architecture)")
+    print("  Anthropomorphic Tendon-Driven Finger Simulation with Environmental Contact")
     print("=" * 75)
-    print(f"  SCALE Parameter      : {SCALE:.2f}")
-    print(f"  Max Spool Angle      : {MAX_MOTOR_ANGLE_RAD:.2f} rad")
-    print(f"  Max Tendon Displace  : {MAX_MOTOR_ANGLE_RAD * SPOOL_RADIUS_M * 1000:.1f} mm")
-    print(f"  Spool Radius         : {SPOOL_RADIUS_MM:.1f} mm")
-    print(f"  Motor Actuator KP    : {MOTOR_KP:.1f}")
+    print(f"  Obstacle position    : {OBSTACLE_POS}")
+    print(f"  Obstacle radius      : {OBSTACLE_RADIUS} m")
+    print(f"  Max DeltaL Target    : 40.0 mm (0.04 m)")
+    print(f"  Tendon Stiffness     : {TENDON_STIFFNESS:.1f} N/m")
+    print("  Joint Spring Stiffnesses:")
+    print(f"    MCP: {MCP_STIFFNESS:.4f} N·m/rad | PIP: {PIP_STIFFNESS:.4f} N·m/rad | DIP: {DIP_STIFFNESS:.4f} N·m/rad")
     print("=" * 75)
 
     model = mujoco.MjModel.from_xml_string(xml_content)
@@ -249,10 +254,10 @@ def main():
     print("Model compiled successfully.")
     print("-" * 75)
     
-    # Initialize live Matplotlib plotting in interactive mode
+    # Initialize live Matplotlib plotting in interactive mode (4 subplots)
     plt.ion()
-    fig, (ax_mcp, ax_pip, ax_dip) = plt.subplots(3, 1, figsize=(6, 8), sharex=True)
-    fig.suptitle("Real-Time Joint Angles vs. Motor Angle", fontsize=12, fontweight="bold")
+    fig, (ax_mcp, ax_pip, ax_dip, ax_force) = plt.subplots(4, 1, figsize=(6, 10), sharex=True)
+    fig.suptitle("Contact Constraint Study: Metrics vs. DeltaL", fontsize=12, fontweight="bold")
 
     # MCP Setup
     line_mcp, = ax_mcp.plot([], [], 'b-', linewidth=2)
@@ -266,26 +271,40 @@ def main():
 
     # DIP Setup
     line_dip, = ax_dip.plot([], [], 'r-', linewidth=2)
-    ax_dip.set_xlabel("Spool Motor Angle (rad)", fontweight="bold")
     ax_dip.set_ylabel("DIP Angle (deg)", fontweight="bold")
     ax_dip.grid(True, linestyle=":", alpha=0.6)
+
+    # Obstacle Force Setup (4th Plot)
+    line_force, = ax_force.plot([], [], 'm-', linewidth=2)
+    ax_force.set_xlabel("Tendon Shortening DeltaL (mm)", fontweight="bold")
+    ax_force.set_ylabel("Obstacle Force (N)", fontweight="bold")
+    ax_force.grid(True, linestyle=":", alpha=0.6)
 
     plt.tight_layout()
     plt.show(block=False)
 
     # Rolling history lists
-    history_motor = []
+    history_delta_L = []
     history_mcp = []
     history_pip = []
     history_dip = []
+    history_obs_force = []
 
     print("Starting passive interactive viewer...")
-    print("Drag the 'spool_motor' slider (0 - 4.5 rad) in the 'Actuator' tab to curl the finger.")
+    print("Drag the 'tendon_displacement' slider (0 to 0.04) in the 'Actuator' tab to curl the finger.")
+    print("Watch the finger contact the rigid red sphere and passively adapt its posture.")
     print("Close the window or press Ctrl+C to stop.")
     print("=" * 75)
 
+    # Reset simulation state and initialize resting length
     mujoco.mj_resetData(model, data)
-    data.ctrl[0] = MOTOR_ANGLE_SETPOINT
+    data.ctrl[0] = DELTA_L_SETPOINT
+    
+    # Compute the initial tendon length in straight posture
+    mujoco.mj_forward(model, data)
+    L_resting = data.ten_length[0]
+    print(f"Computed Tendon resting length L_resting = {L_resting:.5f} m")
+    print("-" * 75)
 
     last_print = 0.0
     plot_last_update = 0.0
@@ -294,11 +313,18 @@ def main():
         viewer.cam.distance = 0.35 * SCALE
         viewer.cam.elevation = -15
         viewer.cam.azimuth = 140
-        viewer.cam.lookat[:] = [0.0, 0.0, 0.08 * SCALE]
+        viewer.cam.lookat[:] = [0.03, 0.0, 0.08 * SCALE]
 
         while viewer.is_running():
             t0 = time.time()
             
+            # Read user setpoint from UI slider (displacement DeltaL in meters)
+            delta_L = data.ctrl[0]
+            
+            # Update tendon springlength programmatically
+            target_L = L_resting - delta_L
+            model.tendon_lengthspring[0] = [target_L, target_L]
+
             # Step the physics
             mujoco.mj_step(model, data)
             viewer.sync()
@@ -308,46 +334,59 @@ def main():
             pip_deg = np.degrees(sd[S_PIP_POS])
             dip_deg = np.degrees(sd[S_DIP_POS])
 
+            # Convert DeltaL to millimeters for graphing and logging
+            delta_L_mm = delta_L * 1000.0
+
             # Update live plot
             if data.time - plot_last_update >= 0.05:
-                # Capture current control input directly from the GUI slider!
-                history_motor.append(data.ctrl[0])
+                obs_force = sd[S_OBSTACLE_FORCE]
+                
+                history_delta_L.append(delta_L_mm)
                 history_mcp.append(mcp_deg)
                 history_pip.append(pip_deg)
                 history_dip.append(dip_deg)
+                history_obs_force.append(obs_force)
                 
                 # Roll history to keep plot from overcrowding (last 1000 points)
-                if len(history_motor) > 1000:
-                    history_motor.pop(0)
+                if len(history_delta_L) > 1000:
+                    history_delta_L.pop(0)
                     history_mcp.pop(0)
                     history_pip.pop(0)
                     history_dip.pop(0)
+                    history_obs_force.pop(0)
                 
                 # Update lines with fresh data
-                line_mcp.set_data(history_motor, history_mcp)
-                line_pip.set_data(history_motor, history_pip)
-                line_dip.set_data(history_motor, history_dip)
+                line_mcp.set_data(history_delta_L, history_mcp)
+                line_pip.set_data(history_delta_L, history_pip)
+                line_dip.set_data(history_delta_L, history_dip)
+                line_force.set_data(history_delta_L, history_obs_force)
                 
                 # Re-limit and auto-scale plots
-                for ax in [ax_mcp, ax_pip, ax_dip]:
+                for ax in [ax_mcp, ax_pip, ax_dip, ax_force]:
                     ax.relim()
                     ax.autoscale_view()
                 
-                # Set X-axis range matching the setpoint scale
-                ax_dip.set_xlim(0.0, max(MAX_MOTOR_ANGLE_RAD, max(history_motor) if history_motor else 1.0))
+                # Set X-axis range matching the setpoint scale (0 to 40 mm)
+                ax_force.set_xlim(0.0, 40.0)
                 
                 plt.pause(0.0001)
                 plot_last_update = data.time
 
             # Console printing
             if data.time - last_print >= 0.1:
-                ctrl_angle = data.ctrl[0]
                 tlen = data.ten_length[0]
+                
+                # Calculate tendon spring tension manually
+                spring_length = model.tendon_lengthspring[0, 0]
+                tension = TENDON_STIFFNESS * max(0.0, tlen - spring_length)
 
-                print(f"t={data.time:5.2f}s | Motor Angle: {ctrl_angle:4.2f} rad | "
-                      f"Length: {tlen:.4f}m")
-                print(f"  Angles   →  MCP: {mcp_deg:5.1f}°   "
-                      f"PIP: {pip_deg:5.1f}°   DIP: {dip_deg:5.1f}°")
+                # Count active contacts and read obstacle contact force sensor
+                ncon = data.ncon
+                obs_force = sd[S_OBSTACLE_FORCE]
+
+                print(f"t={data.time:5.2f}s | DeltaL: {delta_L_mm:4.1f} mm | "
+                      f"Tension: {tension:6.2f} N | Contacts: {ncon} | Obstacle Force: {obs_force:5.2f} N")
+                print(f"  Angles → MCP: {mcp_deg:5.1f}° | PIP: {pip_deg:5.1f}° | DIP: {dip_deg:5.1f}°")
                 print("-" * 75)
                 last_print = data.time
 
