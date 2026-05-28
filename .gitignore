@@ -1,0 +1,26 @@
+# Python caches and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python virtual environment (if placed inside)
+venv/
+.venv/
+mujoco_env/
+
+# IDE settings and OS-specific files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# MuJoCo logs and temporary physics files
+MUJOCO_LOG.TXT
+*.log
+*.tmp
+
+# Ignore specific output files inside plots/ and logs/ but keep the folders
+plots/*
+!plots/.gitkeep
+logs/*
+!logs/.gitkeep
