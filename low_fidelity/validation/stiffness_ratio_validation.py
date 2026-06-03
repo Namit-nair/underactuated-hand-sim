@@ -1,4 +1,4 @@
-#!/home/namit/iitgn/mujoco_env/bin/python
+#!/usr/bin/env python3
 """
 Stiffness-Ratio Trend Validation for 3R Underactuated Tendon-Driven Finger
 ===========================================================================
@@ -14,18 +14,13 @@ All MuJoCo sweeps run with gravity disabled and 2-second equilibration.
 Figures are saved as PNGs in the same directory as this script.
 """
 
-import sys
 import os
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 
-# ---------------------------------------------------------------------------
-# Import simulation model
-# ---------------------------------------------------------------------------
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from underactuated_finger_deltaL_control import (
+from low_fidelity.core.finger_delta_l_control import (
     xml_content,
     MCP_STIFFNESS, PIP_STIFFNESS, DIP_STIFFNESS,
     L_PROX, L_MID, L_DIST,

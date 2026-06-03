@@ -1,15 +1,13 @@
-#!/home/namit/iitgn/mujoco_env/bin/python
-import sys
-import os
+#!/usr/bin/env python3
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, TextBox
 import mujoco
 
-# Ensure we can import from the same directory
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from underactuated_finger_deltaL_control import xml_content, MCP_STIFFNESS, PIP_STIFFNESS, DIP_STIFFNESS
+from low_fidelity.core.finger_delta_l_control import (
+    xml_content, MCP_STIFFNESS, PIP_STIFFNESS, DIP_STIFFNESS,
+)
 
 # ============================================================================
 # Parameters (initial values)
