@@ -1,18 +1,14 @@
-#!/home/namit/iitgn/mujoco_env/bin/python
-import sys
+#!/usr/bin/env python3
 import os
 import argparse
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Add parent directory and utils to sys.path
-SYS_SWEEP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if SYS_SWEEP_DIR not in sys.path:
-    sys.path.append(SYS_SWEEP_DIR)
+from low_fidelity.utils.sim_utils import setup_simulation, run_finger_trajectory, extract_moment_arms
+from low_fidelity.utils.math_utils import analytical_angles_deg, convex_hull_2d, polygon_area_2d
 
-from utils.sim_utils import setup_simulation, run_finger_trajectory, extract_moment_arms
-from utils.math_utils import analytical_angles_deg, convex_hull_2d, polygon_area_2d
+SYS_SWEEP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run a single joint stiffness ratio configuration.")
