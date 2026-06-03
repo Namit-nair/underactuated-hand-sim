@@ -1,4 +1,4 @@
-#!/home/namit/iitgn/mujoco_env/bin/python
+#!/usr/bin/env python3
 import numpy as np
 
 def analytical_angles_deg(delta_L, r, k):

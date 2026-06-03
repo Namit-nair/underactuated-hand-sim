@@ -1,4 +1,4 @@
-#!/home/namit/iitgn/mujoco_env/bin/python
+#!/usr/bin/env python3
 """
 interactive_finger.py
 ---------------------

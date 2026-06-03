@@ -1,4 +1,4 @@
-#!/home/namit/iitgn/mujoco_env/bin/python
+#!/usr/bin/env python3
 """
 MuJoCo Simulation: Anthropomorphic Finger with Direct Tendon Displacement Control
 ===================================================================================
