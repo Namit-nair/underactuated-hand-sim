@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/namit/iitgn/mujoco_env/bin/python3
 """
 interactive_finger.py
 ---------------------
@@ -32,9 +32,9 @@ JOINT_AXIS = (0, 0, 1)
 PALMAR_NORMAL = (0.0, -1.0, 0.0)
 
 # ---- Routing offsets from each link centerline (mm) -----------------
-MCP_OFFSET = 0.0
-PIP_OFFSET = 2.0
-DIP_OFFSET = 5.0
+MCP_OFFSET = 7.0
+PIP_OFFSET = 7.0
+DIP_OFFSET = 7.0
 
 # ---- Routing fractions along each link (0 = proximal joint end) -----
 MCP_ENTRY_FRAC = 0.20;  MCP_EXIT_FRAC   = 0.80
@@ -48,7 +48,7 @@ MAX_DELTA_L      = 0.20     # m
 TENDON_WIDTH     = 0.0006   # m (visual)
 
 # ---- Joint passive mechanics  ← EDIT STIFFNESS HERE ----------------
-MCP_STIFFNESS = 1.0;  PIP_STIFFNESS = 2.0;  DIP_STIFFNESS = 3.0   # N·m/rad
+MCP_STIFFNESS = 1.0;  PIP_STIFFNESS = 1.0;  DIP_STIFFNESS = 1.0   # N·m/rad
 MCP_DAMPING   = 0.08; PIP_DAMPING   = 0.08; DIP_DAMPING   = 0.08  # N·m·s/rad
 MCP_RANGE = (-5, 90); PIP_RANGE = (0, 110); DIP_RANGE = (0, 90)   # degrees
 

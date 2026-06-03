@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 import os
+import sys
 import json
 import csv
 import time
 import numpy as np
+
+# Ensure the mujoco_simulations package root is on the path regardless of CWD
+_pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+if _pkg_root not in sys.path:
+    sys.path.insert(0, _pkg_root)
 
 from low_fidelity.utils.sim_utils import setup_simulation, run_finger_trajectory, extract_moment_arms
 from low_fidelity.utils.math_utils import analytical_angles_deg, convex_hull_2d, polygon_area_2d
@@ -63,8 +69,6 @@ def main():
     for rho1 in ratios:
         for rho3 in ratios:
             run_idx += 1
-            run_start = time.time()
-            
             k1 = rho1 * k2
             k3 = rho3 * k2
             

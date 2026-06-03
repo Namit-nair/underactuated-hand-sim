@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/namit/iitgn/mujoco_env/bin/python3
 import os
 import csv
 import numpy as np
