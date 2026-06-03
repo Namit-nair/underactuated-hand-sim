@@ -8,7 +8,7 @@ def extract_moment_arms():
     """Numerically extracts the effective moment arms r = [r1, r2, r3] of the
     joints (MCP, PIP, DIP) in straight posture by perturbing each joint by dθ = 0.001 rad.
     
-    Reuses the exact validation methodology of tests/stiffness_ratio_validation.py.
+    Reuses the validation methodology of low_fidelity/validation/stiffness_ratio_validation.py.
     """
     model = mujoco.MjModel.from_xml_string(xml_content)
     data = mujoco.MjData(model)
