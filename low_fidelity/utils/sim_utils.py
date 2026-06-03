@@ -1,15 +1,8 @@
-#!/home/namit/iitgn/mujoco_env/bin/python
-import sys
-import os
+#!/usr/bin/env python3
 import numpy as np
 import mujoco
 
-# Add tests/ to path to import baseline XML and properties without copying
-SYS_TESTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../tests'))
-if SYS_TESTS_DIR not in sys.path:
-    sys.path.append(SYS_TESTS_DIR)
-
-from underactuated_finger_deltaL_control import xml_content, L_DIST
+from low_fidelity.core.finger_delta_l_control import xml_content, L_DIST
 
 def extract_moment_arms():
     """Numerically extracts the effective moment arms r = [r1, r2, r3] of the
