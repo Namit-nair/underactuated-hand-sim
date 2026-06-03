@@ -26,6 +26,7 @@ from low_fidelity.finger_delta_l_control import (
     L_PROX, L_MID, L_DIST,
     TENDON_STIFFNESS,
 )
+from analytical_model import analytical_angles_deg
 
 import mujoco
 
@@ -67,31 +68,6 @@ def extract_moment_arms():
         r[i] = (L0 - L1) / dtheta
 
     return r
-
-# ============================================================================
-# Analytical model
-# ============================================================================
-
-def analytical_angles_deg(delta_L, r, k):
-    """Quasi-static analytical prediction for joint angles (degrees).
-
-    θ_i = (r_i / k_i) · ΔL / Σ(r_j² / k_j)
-
-    Parameters
-    ----------
-    delta_L : float  – tendon displacement [m]
-    r : array (3,)   – moment arms [m]
-    k : array (3,)   – joint stiffnesses [Nm/rad]
-
-    Returns
-    -------
-    theta_deg : array (3,)
-    """
-    r = np.asarray(r, dtype=float)
-    k = np.asarray(k, dtype=float)
-    denom = np.sum(r**2 / k)
-    theta_rad = (r / k) * (delta_L / denom)
-    return np.degrees(theta_rad)
 
 # ============================================================================
 # MuJoCo single-point equilibrium evaluation

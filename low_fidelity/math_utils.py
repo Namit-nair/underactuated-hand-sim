@@ -1,41 +1,6 @@
-#!/home/namit/iitgn/mujoco_env/bin/python3
+#!/usr/bin/env python3
 import numpy as np
-
-def analytical_angles_deg(delta_L, r, k):
-    """Quasi-static analytical prediction for joint angles (degrees).
-
-    θ_i = (r_i / k_i) · ΔL / Σ(r_j² / k_j)
-
-    Parameters
-    ----------
-    delta_L : float or array-like
-        Tendon displacement [m]. Can be a scalar or an array of shape (N,).
-    r : array-like (3,)
-        Moment arms [m] for MCP, PIP, DIP joints in straight posture.
-    k : array-like (3,)
-        Joint stiffnesses [Nm/rad] for MCP, PIP, DIP joints.
-
-    Returns
-    -------
-    theta_deg : numpy.ndarray
-        Analytical joint angles in degrees.
-        If delta_L is a scalar, returns shape (3,).
-        If delta_L is shape (N,), returns shape (3, N).
-    """
-    r = np.asarray(r, dtype=float)
-    k = np.asarray(k, dtype=float)
-    denom = np.sum(r**2 / k)
-    
-    delta_L = np.asarray(delta_L)
-    if delta_L.ndim == 0:
-        # Scalar delta_L
-        theta_rad = (r / k) * (delta_L / denom)
-        return np.degrees(theta_rad)
-    else:
-        # Array of delta_L
-        # Output shape: (3, len(delta_L))
-        theta_rad = (r / k).reshape(-1, 1) * (delta_L / denom)
-        return np.degrees(theta_rad)
+from analytical_model import analytical_angles_deg  # noqa: F401 — re-exported for sweep scripts
 
 def convex_hull_2d(points):
     """Computes the convex hull of a set of 2D points using Andrew's monotone chain algorithm.
