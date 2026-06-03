@@ -21,7 +21,7 @@ plt.rcParams.update({
 SYS_SWEEP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def save_heatmap(grid, ratios, title, filename, cbar_label, cmap='viridis', fmt='%.3f'):
-    plots_dir = os.path.join(SYS_SWEEP_DIR, 'results', 'plots')
+    plots_dir = os.path.join(SYS_SWEEP_DIR, '..', '..', 'research_outputs', 'stiffness_sweep_latest', 'plots')
     os.makedirs(plots_dir, exist_ok=True)
     
     n_ratios = len(ratios)
@@ -58,7 +58,7 @@ def save_heatmap(grid, ratios, title, filename, cbar_label, cmap='viridis', fmt=
     print(f"[PLOT SAVED] {out_path}")
 
 def save_global_scatter(x, y, title, filename, xlabel, ylabel, stats):
-    plots_dir = os.path.join(SYS_SWEEP_DIR, 'results', 'plots')
+    plots_dir = os.path.join(SYS_SWEEP_DIR, '..', '..', 'research_outputs', 'stiffness_sweep_latest', 'plots')
     os.makedirs(plots_dir, exist_ok=True)
     
     fig, ax = plt.subplots(figsize=(7, 6))
@@ -104,7 +104,7 @@ def save_global_scatter(x, y, title, filename, xlabel, ylabel, stats):
     print(f"[PLOT SAVED] {out_path}")
 
 def main():
-    summary_path = os.path.join(SYS_SWEEP_DIR, 'results', 'summary.csv')
+    summary_path = os.path.join(SYS_SWEEP_DIR, '..', '..', 'research_outputs', 'stiffness_sweep_latest', 'summary.csv')
     if not os.path.exists(summary_path):
         print(f"Error: {summary_path} not found. Run the sweep first.")
         return
@@ -133,7 +133,7 @@ def main():
     ratio_to_idx = {val: idx for idx, val in enumerate(ratios)}
     
     # Create output CSV
-    output_csv = os.path.join(SYS_SWEEP_DIR, 'results', 'morphology_trend_validation.csv')
+    output_csv = os.path.join(SYS_SWEEP_DIR, '..', '..', 'research_outputs', 'stiffness_sweep_latest', 'morphology_trend_validation.csv')
     with open(output_csv, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['rho1', 'rho3', 'R12_analytical', 'R12_simulation', 'R12_error', 'R32_analytical', 'R32_simulation', 'R32_error'])

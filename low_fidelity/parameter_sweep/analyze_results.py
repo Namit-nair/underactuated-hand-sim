@@ -22,7 +22,7 @@ SYS_SWEEP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def main():
     # 1. Load config to get ratios and references
-    config_path = os.path.join(SYS_SWEEP_DIR, 'configs', 'sweep_config.json')
+    config_path = os.path.join(SYS_SWEEP_DIR, 'sweep_config.json')
     with open(config_path, 'r') as f:
         config = json.load(f)
         
@@ -46,7 +46,7 @@ def main():
     err12_grid = np.zeros((n_ratios, n_ratios))
     err32_grid = np.zeros((n_ratios, n_ratios))
     
-    csv_path = os.path.join(SYS_SWEEP_DIR, 'results', 'summary.csv')
+    csv_path = os.path.join(SYS_SWEEP_DIR, '..', '..', 'research_outputs', 'stiffness_sweep_latest', 'summary.csv')
     if not os.path.exists(csv_path):
         print(f"Error: summary file not found at {csv_path}. Run the sweep first!")
         return
@@ -74,7 +74,7 @@ def main():
             err32_grid[i, j] = float(row['theta32_ratio_error'])
             
     # Create plots directory
-    plots_dir = os.path.join(SYS_SWEEP_DIR, 'results', 'plots')
+    plots_dir = os.path.join(SYS_SWEEP_DIR, '..', '..', 'research_outputs', 'stiffness_sweep_latest', 'plots')
     os.makedirs(plots_dir, exist_ok=True)
     
     # Helper to plot a standard publication-quality heatmap

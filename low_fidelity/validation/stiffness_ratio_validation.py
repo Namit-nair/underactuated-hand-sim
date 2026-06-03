@@ -20,7 +20,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 
-from low_fidelity.core.finger_delta_l_control import (
+from low_fidelity.finger_delta_l_control import (
     xml_content,
     MCP_STIFFNESS, PIP_STIFFNESS, DIP_STIFFNESS,
     L_PROX, L_MID, L_DIST,

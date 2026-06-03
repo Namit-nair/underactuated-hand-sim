@@ -11,8 +11,8 @@ _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 
 if _pkg_root not in sys.path:
     sys.path.insert(0, _pkg_root)
 
-from low_fidelity.utils.sim_utils import setup_simulation, run_finger_trajectory, extract_moment_arms
-from low_fidelity.utils.math_utils import analytical_angles_deg, convex_hull_2d, polygon_area_2d
+from low_fidelity.sim_utils import setup_simulation, run_finger_trajectory, extract_moment_arms
+from low_fidelity.math_utils import analytical_angles_deg, convex_hull_2d, polygon_area_2d
 
 SYS_SWEEP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -20,7 +20,7 @@ def main():
     start_time = time.time()
     
     # 1. Load config
-    config_path = os.path.join(SYS_SWEEP_DIR, 'configs', 'sweep_config.json')
+    config_path = os.path.join(SYS_SWEEP_DIR, 'sweep_config.json')
     with open(config_path, 'r') as f:
         config = json.load(f)
         
@@ -28,7 +28,7 @@ def main():
     k2 = config['k2_reference']
     
     # Create results folder if it doesn't exist
-    results_dir = os.path.join(SYS_SWEEP_DIR, 'results')
+    results_dir = os.path.join(SYS_SWEEP_DIR, '..', '..', 'research_outputs', 'stiffness_sweep_latest')
     os.makedirs(results_dir, exist_ok=True)
     csv_path = os.path.join(results_dir, 'summary.csv')
     

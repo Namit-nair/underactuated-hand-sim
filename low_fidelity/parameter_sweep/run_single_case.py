@@ -5,8 +5,8 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-from low_fidelity.utils.sim_utils import setup_simulation, run_finger_trajectory, extract_moment_arms
-from low_fidelity.utils.math_utils import analytical_angles_deg, convex_hull_2d, polygon_area_2d
+from low_fidelity.sim_utils import setup_simulation, run_finger_trajectory, extract_moment_arms
+from low_fidelity.math_utils import analytical_angles_deg, convex_hull_2d, polygon_area_2d
 
 SYS_SWEEP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -19,7 +19,7 @@ def parse_args():
 
 def run_case(rho1, rho3, generate_plot=False):
     # 1. Load config
-    config_path = os.path.join(SYS_SWEEP_DIR, 'configs', 'sweep_config.json')
+    config_path = os.path.join(SYS_SWEEP_DIR, 'sweep_config.json')
     with open(config_path, 'r') as f:
         config = json.load(f)
         
@@ -102,7 +102,7 @@ def run_case(rho1, rho3, generate_plot=False):
     
     # 7. Generate Plot if requested
     if generate_plot:
-        plots_dir = os.path.join(SYS_SWEEP_DIR, 'results', 'plots')
+        plots_dir = os.path.join(SYS_SWEEP_DIR, '..', '..', 'research_outputs', 'stiffness_sweep_latest', 'plots')
         os.makedirs(plots_dir, exist_ok=True)
         
         fig, (ax_path, ax_angles) = plt.subplots(1, 2, figsize=(13, 6))

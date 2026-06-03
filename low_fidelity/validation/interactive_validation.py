@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, TextBox
 import mujoco
 
-from low_fidelity.core.finger_delta_l_control import (
+from low_fidelity.finger_delta_l_control import (
     xml_content, MCP_STIFFNESS, PIP_STIFFNESS, DIP_STIFFNESS,
 )
 
