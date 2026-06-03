@@ -19,6 +19,12 @@ MUJOCO_LOG.TXT
 *.log
 *.tmp
 
+# SSH keys / secrets — never commit
+newid
+newid.pub
+*.pem
+id_rsa*
+
 # Ignore specific output files inside plots/ and logs/ but keep the folders
 plots/*
 !plots/.gitkeep
