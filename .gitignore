@@ -30,3 +30,7 @@ plots/*
 !plots/.gitkeep
 logs/*
 !logs/.gitkeep
+
+# Generated finger models — rebuilt from config.py on every run
+high_fidelity/finger.xml
+high_fidelity/_finger_fidelity.xml
