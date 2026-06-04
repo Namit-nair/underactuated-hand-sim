@@ -38,8 +38,11 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+import config  # noqa: E402  — single source of truth
+import finger_model  # noqa: E402
 from analytical_model import (  # noqa: E402
     analytical_angles_deg,
+    extract_kinematics_from_model,
     morphology_metrics,
     tendon_tension,
 )
@@ -50,26 +53,38 @@ OUT_DIR = os.path.join(HERE, "validation_results")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # =====================================================================
-# Physical springs (hardware measurement)
+# Hardware springs + validation parameters — ALL sourced from config.py
+# (single source of truth). Change ΔL, springs, or tolerances there.
 # =====================================================================
-SPRING_1 = 0.6487  # large
-SPRING_2 = 0.1184  # medium - used as k2 reference
-SPRING_3 = 0.0286  # small
+SPRING_1 = config.SPRING_1  # large
+SPRING_2 = config.SPRING_2  # medium - used as k2 reference
+SPRING_3 = config.SPRING_3  # small
 
 K2_BASE = SPRING_2
 RHO_LOW = SPRING_3 / K2_BASE   # ≈ 0.2416
 RHO_MID = SPRING_2 / K2_BASE   # = 1.0000
 RHO_HIGH = SPRING_1 / K2_BASE  # ≈ 5.4789
 
-# =====================================================================
-# Validation parameters
-# =====================================================================
-DELTA_L = 0.020         # 20 mm tendon pull
-EQUIL_MAX_TIME = 4.0    # s; convergence cap
-VEL_TOL = 1.0e-3        # rad/s
-SATURATION_TOL = 0.5    # deg from joint limit counts as saturated
+# Physics-fidelity model parameters live in finger_model (itself sourced from
+# config). Override per-call via finger_model.load_fidelity_model(moment_arm=…).
+SHEATH_MOMENT_ARM = finger_model.SHEATH_MOMENT_ARM
 
-LINK_LENGTHS = np.array([0.0555, 0.0416, 0.0358])  # m, from CAD centers
+DELTA_L = config.DELTA_L                # m — tendon pull (edit in config.py)
+EQUIL_MAX_TIME = config.EQUIL_MAX_TIME  # s; convergence cap
+VEL_TOL = config.VEL_TOL                # rad/s
+SATURATION_TOL = config.SATURATION_TOL  # deg from limit that counts as saturated
+
+LINK_LENGTHS = None  # set at runtime by extract_kinematics_from_model
+
+
+def pct_err(sim, ana):
+    """Signed percentage error of a morphology metric:  (sim − ana)/ana × 100.
+
+    Returns NaN where the analytical reference is undefined or ~0 (so the
+    heatmap shows a blank cell rather than a blow-up)."""
+    if not (np.isfinite(sim) and np.isfinite(ana)) or abs(ana) < 1e-9:
+        return np.nan
+    return (sim - ana) / ana * 100.0
 
 ANA_COLOR = '#1F4E79'
 SIM_COLOR = '#C0392B'
@@ -112,10 +127,15 @@ def ensure_xml():
         mod._build_xml()
 
 
+def _fidelity_model():
+    """Build (once) and load the physics-faithful finger model from the
+    auto-generated finger.xml, via the shared finger_model module."""
+    ensure_xml()
+    return finger_model.load_fidelity_model(XML_PATH)
+
+
 def _load_model(k_vec):
-    model = mujoco.MjModel.from_xml_path(XML_PATH)
-    model.opt.gravity[:] = 0.0
-    model.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
+    model = _fidelity_model()
     jids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, n)
             for n in ("mcp", "pip", "dip")]
     for idx, jid in enumerate(jids):
@@ -124,23 +144,12 @@ def _load_model(k_vec):
     return model, data, jids
 
 
-def extract_moment_arms():
-    ensure_xml()
-    model = mujoco.MjModel.from_xml_path(XML_PATH)
-    data = mujoco.MjData(model)
-    mujoco.mj_resetData(model, data)
-    mujoco.mj_forward(model, data)
-    L0 = data.ten_length[0]
-    jids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, n)
-            for n in ("mcp", "pip", "dip")]
-    dtheta = 0.001
-    r = np.zeros(3)
-    for i, jid in enumerate(jids):
-        mujoco.mj_resetData(model, data)
-        data.qpos[jid] = dtheta
-        mujoco.mj_forward(model, data)
-        r[i] = (L0 - data.ten_length[0]) / dtheta
-    return r
+def extract_geometry():
+    """Pull moment arms AND link lengths from the faithful MuJoCo model so
+    the analytical and simulation halves share one source of truth.
+    Delegates to `analytical_model.extract_kinematics_from_model`.
+    """
+    return extract_kinematics_from_model(_fidelity_model())
 
 
 def mujoco_equilibrium(k_vec, delta_L):
@@ -151,18 +160,35 @@ def mujoco_equilibrium(k_vec, delta_L):
     dt = model.opt.timestep
     n_max = int(EQUIL_MAX_TIME / dt)
     conv_time = None
+    # Convergence is declared when EITHER the joint velocities fall below VEL_TOL
+    # (free joints settling) OR the joint positions stop moving (a joint pinned
+    # against a near-rigid limit micro-oscillates, so |qvel| plateaus above
+    # VEL_TOL even though the angle is stationary). The position test compares the
+    # angle now against POS_WIN steps ago.
+    POS_WIN = 200
+    POS_TOL = np.radians(0.02)   # 0.02 deg drift over the window = settled
+    q_hist = np.zeros((POS_WIN, 3))
     for step in range(n_max):
         mujoco.mj_step(model, data)
+        q_now = np.array([data.qpos[jid] for jid in jids])
+        q_hist[step % POS_WIN] = q_now
         if step > 200:
             vels = np.array([data.qvel[jid] for jid in jids])
-            if np.linalg.norm(vels) < VEL_TOL:
+            pos_drift = np.max(np.abs(q_hist.max(axis=0) - q_hist.min(axis=0)))
+            if np.linalg.norm(vels) < VEL_TOL or pos_drift < POS_TOL:
                 conv_time = step * dt
                 break
     angles = np.array([np.degrees(data.qpos[jid]) for jid in jids])
     lo = np.degrees(np.array([model.jnt_range[jid, 0] for jid in jids]))
     hi = np.degrees(np.array([model.jnt_range[jid, 1] for jid in jids]))
+    # Saturation is detected on the raw (pre-clamp) angle so we still flag a
+    # joint that reached its stop.
     sat = [n for n, a, l, h in zip(("mcp", "pip", "dip"), angles, lo, hi)
            if (a >= h - SATURATION_TOL) or (a <= l + SATURATION_TOL)]
+    # Hard backstop: the near-rigid limit constraint already holds the joint at
+    # its mechanical stop; clamp here so the reported angle is GUARANTEED to never
+    # exceed the travel range, regardless of stiffness or residual numerical drift.
+    angles = np.clip(angles, lo, hi)
     return angles, {'conv_time': conv_time, 'saturated': sat}
 
 
@@ -234,7 +260,10 @@ def plot_heatmap(grid, rho_grid, title, cbar_label, filename,
                     norm_val = im.norm(val) if val > 0 else 0.0
                 else:
                     norm_val = (val - vmin) / (vmax - vmin + 1e-12)
-                if dark_text_at_high:
+                if center is not None:
+                    # Diverging map: light bg near the center, dark at the ends.
+                    color = 'white' if abs(norm_val - 0.5) > 0.32 else 'black'
+                elif dark_text_at_high:
                     color = 'white' if norm_val > 0.55 else '#2A0E0E'
                 else:
                     color = 'white' if norm_val < 0.55 else 'black'
@@ -369,8 +398,8 @@ def plot_scatter(ana_grid, sim_grid, metric_label, filename):
 # =====================================================================
 # Morphology stick-figure comparison
 # =====================================================================
-JOINT_LIMITS_DEG = {'mcp': (-5, 90), 'pip': (0, 110), 'dip': (0, 90)}
-JOINT_NAMES = ('MCP', 'PIP', 'DIP')
+JOINT_LIMITS_DEG = dict(zip(config.JOINT_NAMES, config.JOINT_RANGES_DEG))
+JOINT_NAMES = tuple(n.upper() for n in config.JOINT_NAMES)
 
 
 def _chain_points(angles_deg, clip=True):
@@ -424,8 +453,16 @@ def plot_morphology(regime_data, filename):
                           hspace=0.36, wspace=0.20,
                           left=0.05, right=0.98, top=0.84, bottom=0.05)
 
-    xlim = (-0.025, 0.150)
-    ylim = (-0.035, 0.150)
+    # Auto-scale the frame to the drawn chains so any ΔL fits (origin and the
+    # base block at ~-0.012 are always included).
+    all_pts = np.vstack([
+        pts for d in regime_data
+        for pts in (_chain_points(d['theta_ana'])[0],
+                    _chain_points(d['theta_sim'])[0])
+    ])
+    pad = 0.012
+    xlim = (min(all_pts[:, 0].min(), -0.015) - pad, all_pts[:, 0].max() + pad)
+    ylim = (min(all_pts[:, 1].min(), -0.005) - pad, all_pts[:, 1].max() + pad)
 
     handles_legend = None
     for col, d in enumerate(regime_data):
@@ -479,8 +516,8 @@ def plot_morphology(regime_data, filename):
         ax.tick_params(axis='both', labelsize=8.5)
         ax.grid(True, alpha=0.22, ls='--', lw=0.4)
 
-        e12 = 100 * abs(d['M12_sim'] - d['M12_ana']) / max(abs(d['M12_ana']), 1e-9)
-        e32 = 100 * abs(d['M32_sim'] - d['M32_ana']) / max(abs(d['M32_ana']), 1e-9)
+        e12 = pct_err(d['M12_sim'], d['M12_ana'])
+        e32 = pct_err(d['M32_sim'], d['M32_ana'])
         info_text = (
             f"$\\theta_{{\\mathrm{{ana}}}}$ = "
             f"[{th_a[0]:6.1f}°, {th_a[1]:6.1f}°, {th_a[2]:6.1f}°]\n"
@@ -488,10 +525,10 @@ def plot_morphology(regime_data, filename):
             f"[{th_s[0]:6.1f}°, {th_s[1]:6.1f}°, {th_s[2]:6.1f}°]\n"
             f"$M_{{12}}$: ana = {d['M12_ana']:.3f},  "
             f"sim = {d['M12_sim']:.3f}    "
-            f"($e_{{12}}$ = {e12:.1f}%)\n"
+            f"($e_{{12}}$ = {e12:+.1f}%)\n"
             f"$M_{{32}}$: ana = {d['M32_ana']:.3f},  "
             f"sim = {d['M32_sim']:.3f}    "
-            f"($e_{{32}}$ = {e32:.1f}%)\n"
+            f"($e_{{32}}$ = {e32:+.1f}%)\n"
             f"tendon tension  $\\lambda$ = {d['tension_ana']:.2f} N"
         )
         ax_info.text(0.5, 1.0, info_text, transform=ax_info.transAxes,
@@ -593,8 +630,8 @@ def stage_grid_sweep(r_ext, rho_grid):
     grids = {key: np.zeros((n, n)) for key in [
         'theta1_ana', 'theta2_ana', 'theta3_ana',
         'theta1_sim', 'theta2_sim', 'theta3_sim',
-        'M12_ana', 'M12_sim', 'M12_abs_err',
-        'M32_ana', 'M32_sim', 'M32_abs_err',
+        'M12_ana', 'M12_sim', 'M12_abs_err', 'M12_pct_err',
+        'M32_ana', 'M32_sim', 'M32_abs_err', 'M32_pct_err',
         'tension_ana',
     ]}
     sat_mask = np.zeros((n, n), dtype=bool)
@@ -620,9 +657,11 @@ def stage_grid_sweep(r_ext, rho_grid):
             grids['M12_ana'][i, j] = M12_a
             grids['M12_sim'][i, j] = M12_s
             grids['M12_abs_err'][i, j] = abs(M12_s - M12_a)
+            grids['M12_pct_err'][i, j] = pct_err(M12_s, M12_a)
             grids['M32_ana'][i, j] = M32_a
             grids['M32_sim'][i, j] = M32_s
             grids['M32_abs_err'][i, j] = abs(M32_s - M32_a)
+            grids['M32_pct_err'][i, j] = pct_err(M32_s, M32_a)
             grids['tension_ana'][i, j] = T
             sat_mask[i, j] = bool(info['saturated'])
 
@@ -635,8 +674,10 @@ def stage_grid_sweep(r_ext, rho_grid):
                 'theta3_sim_deg': th_s[2],
                 'M12_ana': M12_a, 'M12_sim': M12_s,
                 'M12_abs_err': abs(M12_s - M12_a),
+                'M12_pct_err': pct_err(M12_s, M12_a),
                 'M32_ana': M32_a, 'M32_sim': M32_s,
                 'M32_abs_err': abs(M32_s - M32_a),
+                'M32_pct_err': pct_err(M32_s, M32_a),
                 'tension_ana_N': T,
                 'saturated': ','.join(info['saturated']),
                 'conv_time_s': info['conv_time'] if info['conv_time'] else '',
@@ -674,12 +715,27 @@ def stage_grid_sweep(r_ext, rho_grid):
          'tension [N]', 'cividis', '{:.2f}', False, False),
     ]
 
+    # Signed percentage-error maps: (M_sim − M_ana)/M_ana × 100, diverging,
+    # centered at 0 (blue = sim under-predicts, red = over-predicts).
+    PCT_ERR_SPECS = [
+        ('M12_pct_err',
+         'Percentage error  $(M_{12}^{sim}\\!-\\!M_{12}^{ana})/M_{12}^{ana}\\times100$'),
+        ('M32_pct_err',
+         'Percentage error  $(M_{32}^{sim}\\!-\\!M_{32}^{ana})/M_{32}^{ana}\\times100$'),
+    ]
+
     for key, title, cbar, cmap, fmt, log_norm, dark_high in HEATMAP_SPECS:
         out = os.path.join(OUT_DIR, f'heatmap_{key}.png')
         plot_heatmap(grids[key], rho_grid, title, cbar, out,
                      cmap=cmap, fmt=fmt,
                      sat_mask=sat_mask if key.endswith('_sim') else None,
                      log_norm=log_norm, dark_text_at_high=dark_high)
+        print(f"  [SAVED] heatmap_{key}.png")
+
+    for key, title in PCT_ERR_SPECS:
+        out = os.path.join(OUT_DIR, f'heatmap_{key}.png')
+        plot_heatmap(grids[key], rho_grid, title, '% error', out,
+                     cmap='RdBu_r', fmt='{:+.1f}', center=0.0)
         print(f"  [SAVED] heatmap_{key}.png")
 
     print("  generating scatter plots...")
@@ -708,10 +764,8 @@ def stage_metric_table(regime_data):
     print("\n[STAGE 5] Morphology metric table")
     rows = []
     for d in regime_data:
-        e12 = (100 * abs(d['M12_sim'] - d['M12_ana']) / abs(d['M12_ana'])
-               if abs(d['M12_ana']) > 1e-9 else float('nan'))
-        e32 = (100 * abs(d['M32_sim'] - d['M32_ana']) / abs(d['M32_ana'])
-               if abs(d['M32_ana']) > 1e-9 else float('nan'))
+        e12 = pct_err(d['M12_sim'], d['M12_ana'])
+        e32 = pct_err(d['M32_sim'], d['M32_ana'])
         rows.append({
             'regime': d['short'],
             'rho1': round(d['rho1'], 4),
@@ -771,11 +825,15 @@ def main():
 
     t0 = time.time()
 
-    print("\n[STAGE 1] Moment arm extraction")
-    r_ext = extract_moment_arms()
+    print("\n[STAGE 1] Geometry extraction (single source of truth)")
+    global LINK_LENGTHS
+    r_ext, LINK_LENGTHS = extract_geometry()
     print(f"  r1 (MCP) = {r_ext[0]*1000:.3f} mm")
     print(f"  r2 (PIP) = {r_ext[1]*1000:.3f} mm")
     print(f"  r3 (DIP) = {r_ext[2]*1000:.3f} mm")
+    print(f"  L1 proximal = {LINK_LENGTHS[0]*1000:.2f} mm")
+    print(f"  L2 middle   = {LINK_LENGTHS[1]*1000:.2f} mm")
+    print(f"  L3 distal   = {LINK_LENGTHS[2]*1000:.2f} mm")
 
     stage_trend_sweep(r_ext, rho_grid)
     regime_data = stage_morphology(r_ext)
