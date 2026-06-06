@@ -20,6 +20,8 @@ Key Concepts:
 
 import time
 import numpy as np
+import os, sys
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 import mujoco
 import mujoco.viewer
 import matplotlib.pyplot as plt
@@ -108,10 +110,8 @@ xml_content = f"""
         <global offwidth="1920" offheight="1080" elevation="-15" azimuth="135"/>
     </visual>
 
+    <include file="{os.path.join(_REPO_ROOT, 'scene.xml')}"/>
     <asset>
-        <texture type="skybox" builtin="gradient" rgb1="0.1 0.12 0.15" rgb2="0.02 0.03 0.04" width="256" height="256"/>
-        <texture name="grid" type="2d" builtin="checker" rgb1="0.12 0.14 0.16" rgb2="0.08 0.09 0.1" width="512" height="512" mark="edge" markrgb="0.2 0.22 0.25"/>
-        <material name="grid_floor" texture="grid" texrepeat="2 2" texuniform="true" reflectance="0.1"/>
         <material name="bone" rgba="0.6 0.8 1.0 0.45" shininess="0.9" specular="0.9"/>
         <material name="pivot" rgba="0.8 0.5 0.2 1.0" shininess="0.8" specular="0.8"/>
     </asset>
@@ -124,11 +124,6 @@ xml_content = f"""
     </default>
 
     <worldbody>
-        <light pos="1 1 3" dir="-0.3 -0.3 -1" castshadow="true"/>
-        <light pos="-1 -1 2.5" dir="0.3 0.3 -1" castshadow="false"/>
-
-        <geom type="plane" size="3 3 0.1" material="grid_floor"/>
-
         <!-- ===== Anchor base (fixed to world, minimal cylindrical/pin style) ===== -->
         <body name="anchor" pos="0 0 0.1">
             <geom type="cylinder" size="0.002 {R_PROX * 1.5}" pos="0 0 0" euler="90 0 0" rgba="0.5 0.5 0.5 0.6"/>

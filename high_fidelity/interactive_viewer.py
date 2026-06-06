@@ -107,20 +107,14 @@ def _build_xml():
     <site group="3"/>
   </default>
 
+  <include file="{os.path.join(_REPO_ROOT, 'scene.xml')}"/>
   <asset>
     <mesh name="proximal_mesh" file="proximal.stl"/>
     <mesh name="middle_mesh"   file="middle.stl"/>
     <mesh name="distal_mesh"   file="distal.stl"/>
-    <texture name="grid" type="2d" builtin="checker" rgb1="0.2 0.25 0.3" rgb2="0.15 0.18 0.22"
-             width="300" height="300"/>
-    <material name="grid" texture="grid" texrepeat="6 6" reflectance="0.1"/>
   </asset>
 
   <worldbody>
-    <light pos="0 -0.3 0.5" dir="0 0.5 -1" diffuse="0.9 0.9 0.9"/>
-    <light pos="0.2 0.2 0.4" dir="-0.3 -0.3 -1" diffuse="0.5 0.5 0.5"/>
-    <geom name="floor" type="plane" size="0.5 0.5 0.05" pos="0 0 0" material="grid"/>
-
     <body name="base" pos="0 0 0.05" euler="0 1.5707963 0">
       <geom name="base_x_axis" type="cylinder" size="0.001" fromto="0 0 0  0.04 0 0" rgba="1 0 0 1" contype="0" conaffinity="0" mass="0"/>
       <geom name="base_y_axis" type="cylinder" size="0.001" fromto="0 0 0  0 0.04 0" rgba="0 1 0 1" contype="0" conaffinity="0" mass="0"/>
