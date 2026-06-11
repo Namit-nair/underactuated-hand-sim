@@ -99,7 +99,21 @@ GRAVITY = (0, 0, -9.81)
 #      * near-inextensible tendon,
 #      * near-rigid joint limits + matching timestep.
 # =====================================================================
-SHEATH_MOMENT_ARM = 0.007      # m — constant tendon moment arm = sheath offset
+SHEATH_MOMENT_ARM = 0.007      # m — tendon moment arm at full extension (0°)
+                               #     (still the constant arm used by the MuJoCo
+                               #      sheath geom + the analytical fallback).
+
+# ---- Angle-dependent moment arm (analytical model) -------------------------
+# CAD shows the tendon moment arm is NOT constant: it grows with joint flexion
+# from SHEATH_MOMENT_ARM at 0° (links straight) to MOMENT_ARM_FULL_FLEXION at
+# MOMENT_ARM_FLEXION_REF_DEG of flexion. Assumed LINEAR between the two CAD
+# measurements. analytical_model.py adds this per-joint increment on top of each
+# joint's extension arm and solves the resulting implicit equilibrium.
+# Set MOMENT_ARM_ANGLE_DEPENDENT = False to fall back to the constant arm.
+MOMENT_ARM_ANGLE_DEPENDENT = True
+MOMENT_ARM_FULL_FLEXION = 0.012        # m — moment arm at full flexion (from CAD)
+MOMENT_ARM_FLEXION_REF_DEG = 90.0      # deg — flexion at which the above is measured
+
 TENDON_STIFFNESS = 1.0e5       # N/m — near-inextensible steel string
 TENDON_DAMPING = 6.0           # N·s/m
 SIM_TIMESTEP = 0.001           # s — small enough for near-rigid limits
@@ -223,12 +237,19 @@ LOAD_TEST_OBJECT_DEPTH_X = 0.050        # m — default: an enveloping grasp tha
 # interactive_load_test.capped_lengthspring); once the pull T exceeds what the
 # capped grip can hold, the object slips and slides to the LOAD_TEST_SLIDE_RANGE end.
 #
+# Tendon spool at the servo horn — SINGLE SOURCE OF TRUTH for the winding radius.
+# Used both by the hardware rig (ΔL <-> servo revolutions, hardware/servo.py) and
+# by the load-test force ceiling below. MEASURED on the as-built spool:
+# outer diameter 22.35 mm -> radius 11.175 mm. (Was previously guessed at 10 mm /
+# 12.5 mm in different places; this constant unifies them.)
+SPOOL_RADIUS = 0.011175                 # m — measured tendon winding radius (Ø22.35 mm)
+
 # The ceiling comes from the servo, which winds the tendon onto a spool of radius
-# LOAD_TEST_SPOOL_RADIUS:  tendon tension = servo_torque / spool_radius.
+# SPOOL_RADIUS:  tendon tension = servo_torque / spool_radius.
 # One servo per finger, so each flexor gets the full stall torque.
 #   Dynamixel XM430-W350-T: ~45 kgf·cm ≈ 4.41 N·m stall (max output).
-#   r_spool = 10 mm  →  F_max ≈ 441 N per finger.
+#   r_spool = 11.175 mm  →  F_max ≈ 395 N per finger.
 LOAD_TEST_SERVO_STALL_TORQUE = 4.41     # N·m — servo max output (Dynamixel XM430-W350-T, ~45 kgf·cm)
-LOAD_TEST_SPOOL_RADIUS = 0.010          # m — string winding radius at the servo horn
+LOAD_TEST_SPOOL_RADIUS = SPOOL_RADIUS   # m — string winding radius at the servo horn (see SPOOL_RADIUS)
 LOAD_TEST_MAX_TENDON_FORCE = LOAD_TEST_SERVO_STALL_TORQUE / LOAD_TEST_SPOOL_RADIUS  # N — per-finger flexor force ceiling
 LOAD_TEST_MAX_FORCE_UI_MAX = 600.0      # N — upper bound of the live "F max" slider

@@ -15,9 +15,9 @@ which is multi-turn: goal positions are commanded in encoder *ticks* with
 Tendon / spool model (ΔL <-> servo)
 -----------------------------------
 The finger tendon winds on a spool of radius ``spool_radius_m`` (default
-0.0125 m, i.e. a 25 mm diameter spool). One revolution of the spool pays
-out / takes in one circumference of tendon. Defining a captured "zero"
-revolution reference at :meth:`Servo.set_zero` time::
+``config.SPOOL_RADIUS`` = 0.011175 m, i.e. the measured Ø22.35 mm spool).
+One revolution of the spool pays out / takes in one circumference of tendon.
+Defining a captured "zero" revolution reference at :meth:`Servo.set_zero` time::
 
     delta_L_m = pull_sign * (2*pi*spool_radius_m) * (goal_rev - zero_rev)
     goal_rev  = zero_rev + pull_sign * delta_L_m / (2*pi*spool_radius_m)
@@ -55,10 +55,18 @@ dashboard / scripts can run with no hardware attached.
 
 from __future__ import annotations
 
+import glob
 import math
+import os
 import sys
 import time
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
+
+# --- repo single-source-of-truth (spool radius etc.) -------------------------
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+import config  # noqa: E402
 
 # --- dynamixel_sdk import robustness -----------------------------------------
 # Keep the import guarded: the module must still import (for the MockServo
@@ -117,6 +125,68 @@ def _circumference(spool_radius_m: float) -> float:
     return 2.0 * math.pi * spool_radius_m
 
 
+# Baud rates tried during auto-detection (common Dynamixel rates, default first).
+_AUTODETECT_BAUDS = (57600, 1000000, 115200, 2000000, 3000000, 4000000, 9600)
+
+
+def list_serial_ports() -> List[str]:
+    """Enumerate likely Dynamixel USB serial ports (Linux: ttyUSB*/ttyACM*)."""
+    return sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+
+
+def autodetect_servo(
+    preferred_port: Optional[str] = None,
+    protocol: float = 2.0,
+    baudrates: Optional[Tuple[int, ...]] = None,
+    candidate_ports: Optional[List[str]] = None,
+) -> Tuple[bool, Optional[str], Optional[int], Optional[int], str]:
+    """Scan serial ports + baud rates for a Dynamixel, regardless of USB port.
+
+    Tries ``preferred_port`` first (if given), then every ``/dev/ttyUSB*`` /
+    ``/dev/ttyACM*`` port, broadcast-pinging at each baud until a motor answers.
+
+    Returns ``(ok, port, baud, dxl_id, message)``. On success ``port/baud/id``
+    are the discovered values; on failure they are ``None`` and ``message``
+    explains why.
+    """
+    if not _SDK_AVAILABLE:
+        return False, None, None, None, f"dynamixel_sdk not available: {_SDK_IMPORT_ERROR}"
+
+    bauds = tuple(baudrates) if baudrates else _AUTODETECT_BAUDS
+
+    ports: List[str] = []
+    if preferred_port:
+        ports.append(preferred_port)
+    for p in (candidate_ports if candidate_ports is not None else list_serial_ports()):
+        if p not in ports:
+            ports.append(p)
+    if not ports:
+        return (False, None, None, None,
+                "No /dev/ttyUSB* or /dev/ttyACM* ports found. Is the U2D2 "
+                "interface plugged in and powered?")
+
+    for port in ports:
+        port_handler = PortHandler(port)
+        packet_handler = PacketHandler(protocol)
+        if not port_handler.openPort():
+            continue
+        try:
+            for baud in bauds:
+                if not port_handler.setBaudRate(baud):
+                    continue
+                data_list, _comm = packet_handler.broadcastPing(port_handler)
+                if data_list:
+                    found_id = int(sorted(data_list.keys())[0])
+                    return (True, port, baud, found_id,
+                            f"found Dynamixel id {found_id} on {port} @ {baud} baud")
+        finally:
+            port_handler.closePort()
+
+    return (False, None, None, None,
+            "No Dynamixel responded on any port/baud. Check 12 V power, the "
+            "U2D2 cable, and the motor daisy-chain.")
+
+
 class SoftLimitError(ValueError):
     """Raised when a commanded ΔL would exceed the soft cap or go negative."""
 
@@ -131,11 +201,11 @@ class Servo:
 
     def __init__(
         self,
-        port: str = "/dev/ttyUSB0",
+        port: str = "auto",
         baud: int = 57600,
         dxl_id: int = 15,
         protocol: float = 2.0,
-        spool_radius_m: float = 0.0125,
+        spool_radius_m: float = config.SPOOL_RADIUS,
         soft_delta_l_cap_mm: float = 25.0,
         current_limit_units: int = 1193,
         overcurrent_warn_ma: float = 3000.0,
@@ -270,6 +340,16 @@ class Servo:
             )
         if self._connected:
             return True, "already connected"
+
+        # Auto-detect the port/baud/id when requested (port "auto" / None / "").
+        # Robust to the U2D2 enumerating on a different /dev/ttyUSB* each plug-in.
+        if self.port in (None, "", "auto"):
+            ok, port, baud, dxl_id, msg = autodetect_servo(protocol=self.protocol)
+            if not ok:
+                return False, f"servo auto-detect failed: {msg}"
+            self.port = port
+            self.baud = baud
+            self.dxl_id = dxl_id
 
         self._port_handler = PortHandler(self.port)
         self._packet_handler = PacketHandler(self.protocol)
@@ -595,11 +675,11 @@ class MockServo:
 
     def __init__(
         self,
-        port: str = "/dev/ttyUSB0",
+        port: str = "auto",
         baud: int = 57600,
         dxl_id: int = 15,
         protocol: float = 2.0,
-        spool_radius_m: float = 0.0125,
+        spool_radius_m: float = config.SPOOL_RADIUS,
         soft_delta_l_cap_mm: float = 25.0,
         current_limit_units: int = 1193,
         overcurrent_warn_ma: float = 3000.0,
@@ -843,4 +923,10 @@ class MockServo:
             self._overcurrent_count = 0
 
 
-__all__ = ["Servo", "MockServo", "SoftLimitError"]
+__all__ = [
+    "Servo",
+    "MockServo",
+    "SoftLimitError",
+    "autodetect_servo",
+    "list_serial_ports",
+]
