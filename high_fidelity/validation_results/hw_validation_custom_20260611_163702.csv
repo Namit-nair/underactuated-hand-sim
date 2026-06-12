@@ -1,4 +1,5 @@
-timestamp,spring_set_label,rho1,rho3,k_mcp,k_pip,k_dip,delta_L_mm,servo_pos,servo_current,theta_mcp_exp,theta_pip_exp,theta_dip_exp,theta_mcp_ana,theta_pip_ana,theta_dip_ana,err_mcp,err_pip,err_dip,M12_exp,M32_exp,M12_ana,M32_ana,markers_all_visible,settle_time_s,trial_idx
+Highlights
+ PROtimestamp,spring_set_label,rho1,rho3,k_mcp,k_pip,k_dip,delta_L_mm,servo_pos,servo_current,theta_mcp_exp,theta_pip_exp,theta_dip_exp,theta_mcp_ana,theta_pip_ana,theta_dip_ana,err_mcp,err_pip,err_dip,M12_exp,M32_exp,M12_ana,M32_ana,markers_all_visible,settle_time_s,trial_idx
 2026-06-11T16:37:02,custom,1.0,1.0,0.165,0.165,0.165,5.0,0.000244,-8.07,5.636717,-2.577278,-0.781835,13.641852,13.641852,13.641852,-8.005135,-16.21913,-14.423688,-2.187081,0.303357,1.0,1.0,True,nan,0
 2026-06-11T16:37:12,custom,1.0,1.0,0.165,0.165,0.165,5.0,0.0,-2.69,0.102781,0.157751,0.283992,13.641852,13.641852,13.641852,-13.539071,-13.484102,-13.35786,0.651544,1.800261,1.0,1.0,True,nan,0
 2026-06-11T16:37:24,custom,1.0,1.0,0.165,0.165,0.165,5.0,0.0,-8.07,0.265737,0.111198,-0.573143,13.641852,13.641852,13.641852,-13.376115,-13.530654,-14.214996,2.389762,-5.154249,1.0,1.0,True,nan,0
