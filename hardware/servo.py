@@ -213,7 +213,7 @@ class Servo:
         dxl_id: int = 15,
         protocol: float = 2.0,
         spool_radius_m: float = config.SPOOL_RADIUS,
-        soft_delta_l_cap_mm: float = 25.0,
+        soft_delta_l_cap_mm: float = 60.0,
         current_limit_units: int = 1193,
         overcurrent_warn_ma: float = 3000.0,
         pull_sign: int = +1,

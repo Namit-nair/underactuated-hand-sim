@@ -70,7 +70,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 JOINTS = ("mcp", "pip", "dip")
 JCOLORS = {"mcp": "#58a6ff", "pip": "#7ee787", "dip": "#ff7b72"}
-DELTA_PRESETS = (0.0, 5.0, 10.0, 15.0, 20.0, 25.0)
+DELTA_PRESETS = (0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0)  # mm, in the order they appear on the UI
 TICK_MS = 50  # 20 Hz main loop
 
 # Set-Zero / Capture averaging: the ArUco in-plane angles jitter a few degrees
