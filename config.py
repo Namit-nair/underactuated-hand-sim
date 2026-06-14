@@ -36,6 +36,12 @@ DIP_CENTER = (-84.6, 0.0, 0.0)
 TIP_POINT = (-120.399, 0.0, 0.0)
 JOINT_AXIS = (0, 0, 1)
 
+# Link masses [kg] — written into finger.xml <inertial mass="...">.
+# Change here and re-run interactive_viewer.py to regenerate.
+PROXIMAL_MASS = 0.0155
+MIDDLE_MASS   = 0.00679
+DISTAL_MASS   = 0.00391
+
 # Palmar (tendon/flexor) side normal
 PALMAR_NORMAL = (0.0, -1.0, 0.0)
 
@@ -136,6 +142,11 @@ LIMIT_SOLIMP = "0.99 0.9999 0.0001 0.5 2"
 SPRING_1 = 0.6487   # large
 SPRING_2 = 0.1184   # medium — reference k2
 SPRING_3 = 0.0286   # small
+
+# Sweep grid: log-spaced points BETWEEN adjacent springs, plus the 3 springs
+# themselves. Total grid size = 2 * SWEEP_N_PER_INTERVAL + 3.
+# E.g. SWEEP_N_PER_INTERVAL = 2 → grid of 7: S3, ·, ·, S2, ·, ·, S1.
+SWEEP_N_PER_INTERVAL = 2
 
 # =====================================================================
 # 6. VALIDATION — actuation magnitude and equilibrium-solver tolerances.
