@@ -194,6 +194,62 @@ def autodetect_servo(
             "U2D2 cable, and the motor daisy-chain.")
 
 
+def open_bus(
+    port: str = "auto",
+    baud: int = 57600,
+    protocol: float = 2.0,
+    expected_ids: Optional[Tuple[int, ...]] = None,
+):
+    """Open ONE U2D2 serial bus shared by several daisy-chained servos.
+
+    Opens a single ``PortHandler``/``PacketHandler`` (auto-detecting the port +
+    baud when ``port`` is ``"auto"``), broadcast-pings the bus, and returns
+    handles the caller hands to each :meth:`Servo.attach_bus`. This avoids
+    opening the same ``/dev/ttyUSB*`` once per motor (which fails on the 2nd).
+
+    Returns ``(ok, port_handler, packet_handler, port, baud, ids, message)``.
+    On failure the handlers are ``None`` and ``message`` explains why. When
+    ``expected_ids`` is given, ``ok`` requires every one of them to answer.
+    """
+    if not _SDK_AVAILABLE:
+        return (False, None, None, None, None, [],
+                f"dynamixel_sdk not available: {_SDK_IMPORT_ERROR}")
+
+    # Resolve port + baud (and confirm at least one motor answers) first.
+    detect_id = expected_ids[0] if expected_ids else None
+    ok, found_port, found_baud, _id, msg = autodetect_servo(
+        preferred_port=None if port in (None, "", "auto") else port,
+        protocol=protocol,
+        baudrates=None if port in (None, "", "auto") else (baud,),
+        preferred_id=detect_id,
+    )
+    if not ok:
+        return False, None, None, None, None, [], f"bus open failed: {msg}"
+
+    port_handler = PortHandler(found_port)
+    packet_handler = PacketHandler(protocol)
+    if not port_handler.openPort():
+        return (False, None, None, None, None, [],
+                f"failed to open shared port {found_port}")
+    if not port_handler.setBaudRate(found_baud):
+        port_handler.closePort()
+        return (False, None, None, None, None, [],
+                f"failed to set baud {found_baud} on {found_port}")
+
+    data_list, _comm = packet_handler.broadcastPing(port_handler)
+    ids = sorted(int(i) for i in (data_list or {}).keys())
+    if expected_ids is not None:
+        missing = [i for i in expected_ids if i not in ids]
+        if missing:
+            port_handler.closePort()
+            return (False, None, None, None, None, ids,
+                    f"expected servo id(s) {missing} not found on {found_port} "
+                    f"@ {found_baud} baud (saw {ids or 'none'})")
+
+    return (True, port_handler, packet_handler, found_port, found_baud, ids,
+            f"bus open on {found_port} @ {found_baud} baud, ids {ids}")
+
+
 class SoftLimitError(ValueError):
     """Raised when a commanded ΔL would exceed the soft cap or go negative."""
 
@@ -231,9 +287,12 @@ class Servo:
         self.overcurrent_warn_ma = float(overcurrent_warn_ma)
         self.pull_sign = 1 if pull_sign >= 0 else -1
 
-        # SDK handles (created at connect()).
+        # SDK handles (created at connect(), or injected via attach_bus()).
         self._port_handler = None
         self._packet_handler = None
+        # Whether this Servo owns its serial port (opens/closes it). False when
+        # the port is a shared U2D2 bus owned elsewhere (see attach_bus / open_bus).
+        self._owns_port = True
 
         # State.
         self._connected = False
@@ -348,49 +407,57 @@ class Servo:
         if self._connected:
             return True, "already connected"
 
-        # Auto-detect the port/baud/id when requested (port "auto" / None / "").
-        # Robust to the U2D2 enumerating on a different /dev/ttyUSB* each plug-in.
-        if self.port in (None, "", "auto"):
-            ok, port, baud, dxl_id, msg = autodetect_servo(
-                protocol=self.protocol, preferred_id=self.dxl_id)
-            if not ok:
-                return False, f"servo auto-detect failed: {msg}"
-            self.port = port
-            self.baud = baud
-            self.dxl_id = dxl_id
+        if self._owns_port:
+            # Auto-detect the port/baud/id when requested (port "auto" / None / "").
+            # Robust to the U2D2 enumerating on a different /dev/ttyUSB* each plug-in.
+            if self.port in (None, "", "auto"):
+                ok, port, baud, dxl_id, msg = autodetect_servo(
+                    protocol=self.protocol, preferred_id=self.dxl_id)
+                if not ok:
+                    return False, f"servo auto-detect failed: {msg}"
+                self.port = port
+                self.baud = baud
+                self.dxl_id = dxl_id
 
-        self._port_handler = PortHandler(self.port)
-        self._packet_handler = PacketHandler(self.protocol)
+            self._port_handler = PortHandler(self.port)
+            self._packet_handler = PacketHandler(self.protocol)
 
-        if not self._port_handler.openPort():
-            return False, f"failed to open port {self.port}"
-        if not self._port_handler.setBaudRate(self.baud):
-            self._port_handler.closePort()
-            return False, f"failed to set baud rate {self.baud}"
+            if not self._port_handler.openPort():
+                return False, f"failed to open port {self.port}"
+            if not self._port_handler.setBaudRate(self.baud):
+                self._port_handler.closePort()
+                return False, f"failed to set baud rate {self.baud}"
+        else:
+            # Shared bus: attach_bus() injected an already-open port + packet
+            # handler owned by the bus (e.g. two fingers on one U2D2). Don't open
+            # or close it here — just run the per-id init sequence below.
+            if self._port_handler is None or self._packet_handler is None:
+                return False, ("shared-bus servo has no attached port — "
+                               "call attach_bus() before connect()")
 
         # Safe init: torque OFF before touching EEPROM (operating mode +
         # current limit both require torque disabled).
         ok, msg = self._write1(ADDR_TORQUE_ENABLE, TORQUE_OFF)
         if not ok:
-            self._port_handler.closePort()
+            self._close_owned_port()
             return False, f"torque off failed ({msg})"
 
         ok, msg = self._write1(
             ADDR_OPERATING_MODE, OPERATING_MODE_EXTENDED_POSITION
         )
         if not ok:
-            self._port_handler.closePort()
+            self._close_owned_port()
             return False, f"set operating mode failed ({msg})"
 
         ok, msg = self._write2(ADDR_CURRENT_LIMIT, self.current_limit_units)
         if not ok:
-            self._port_handler.closePort()
+            self._close_owned_port()
             return False, f"set current limit failed ({msg})"
 
         # Torque ON to begin position control.
         ok, msg = self._write1(ADDR_TORQUE_ENABLE, TORQUE_ON)
         if not ok:
-            self._port_handler.closePort()
+            self._close_owned_port()
             return False, f"torque on failed ({msg})"
 
         self._connected = True
@@ -415,7 +482,11 @@ class Servo:
         )
 
     def disconnect(self) -> None:
-        """Disable torque and close the port (guarded if not open)."""
+        """Disable torque and close the port (guarded if not open).
+
+        A shared-bus servo (``_owns_port == False``) does NOT close the port —
+        the bus owner is responsible for closing it once all motors are done.
+        """
         if not self._connected:
             return
         try:
@@ -423,13 +494,32 @@ class Servo:
         except Exception:
             pass
         self._torque_on = False
-        try:
-            if self._port_handler is not None:
-                self._port_handler.closePort()
-        except Exception:
-            pass
+        self._close_owned_port()
         self._connected = False
         self._ramp_active = False
+
+    def attach_bus(self, port_handler, packet_handler, port: str,
+                   baud: int) -> None:
+        """Bind this servo to a shared, already-open U2D2 bus.
+
+        Use when several daisy-chained motors share one serial port (e.g. the
+        two finger servos on one U2D2). The bus owner opens the port once via
+        :func:`open_bus`, then calls this for each motor; :meth:`connect` then
+        skips opening/closing and only runs the per-id init sequence.
+        """
+        self._port_handler = port_handler
+        self._packet_handler = packet_handler
+        self.port = port
+        self.baud = baud
+        self._owns_port = False
+
+    def _close_owned_port(self) -> None:
+        """Close the serial port only if this servo owns it (never a shared bus)."""
+        if self._owns_port and self._port_handler is not None:
+            try:
+                self._port_handler.closePort()
+            except Exception:
+                pass
 
     # -- torque control ---------------------------------------------------
     def enable(self) -> Tuple[bool, str]:
