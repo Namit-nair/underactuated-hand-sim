@@ -8,6 +8,7 @@
 pyrealsense2>=2.54        # Intel RealSense color stream
 opencv-contrib-python>=4.7  # cv2.aruco (DICT_4X4_50, subpixel corner refine)
 dynamixel-sdk>=3.8.4      # Dynamixel XM430-W350-T/R control (Protocol 2.0)
+pyserial>=3.5            # Futek LCM300 / USB220 ASCII serial stream (load-test rig)
 PySide6>=6.5              # dashboard GUI
 matplotlib>=3.7           # embedded live plots
 numpy>=1.23
