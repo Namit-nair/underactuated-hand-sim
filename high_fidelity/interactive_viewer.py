@@ -232,6 +232,17 @@ def main():
     model = mujoco.MjModel.from_xml_path(XML_PATH)
     data  = mujoco.MjData(model)
 
+    # The visual tendon is very stiff (VIS_TENDON_STIFFNESS ≈ 1e6 N/m). MuJoCo
+    # integrates a tendon spring's position force explicitly, so the XML's coarse
+    # 2 ms viewer timestep is numerically unstable for it — the joints diverge and
+    # the finger whirls ("spins on its axis") even at zero pull. Integrate at a
+    # small, stable sub-step instead (the gripper does the same) and run several
+    # sub-steps per rendered frame to stay real-time.
+    SIM_DT = 5.0e-4                                   # s — stable for the stiff visual tendon
+    model.opt.timestep = SIM_DT
+    n_sub = max(1, round((1.0 / 120.0) / SIM_DT))     # physics sub-steps per frame
+    frame_dt = n_sub * SIM_DT
+
     tendon_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_TENDON, "flexor")
     jids = {n: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, n)
             for n in ("mcp", "pip", "dip")}
@@ -266,7 +277,8 @@ def main():
             delta_L_m = current_disp_mm / 1000.0
             model.tendon_lengthspring[tendon_id, :] = rest_len - delta_L_m
 
-            mujoco.mj_step(model, data)
+            for _ in range(n_sub):
+                mujoco.mj_step(model, data)
             viewer.sync()
 
             now = time.time()
@@ -282,7 +294,7 @@ def main():
                 sys.stdout.flush()
                 last_print = now
 
-            dt = model.opt.timestep - (time.time() - step_start)
+            dt = frame_dt - (time.time() - step_start)
             if dt > 0:
                 time.sleep(dt)
 
