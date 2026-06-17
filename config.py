@@ -298,3 +298,76 @@ PULL_MAX_DELTA_MM = 120.0               # pull-servo soft ΔL cap (string take-u
 # -- Release detection ------------------------------------------------
 RELEASE_DROP_FRAC = 0.30                # force drop from the running peak that flags release
 RELEASE_MIN_FORCE_N = 2.0               # noise floor — ignore drops below this force
+
+
+# =====================================================================
+# 9. CHAOS / NON-DETERMINISM STUDY  —  high_fidelity/chaos_study.py
+# =====================================================================
+# Tests whether a ZERO-joint-stiffness underactuated finger is chaotic /
+# non-deterministic. The fixed tendon (L = Σ coef_i·θ_i) is ONE constraint on
+# THREE joints, so at k=0 (gravity & contact off) the equilibrium is a 2-D
+# manifold — the final pose is selected only by the transient, hence acutely
+# sensitive to the initial joint angles. We inject small initial-angle noise and
+# measure how far the SETTLED pose scatters, contrasting k=0 against a non-zero
+# baseline stiffness (the scatter collapsing under stiffness is the "why
+# stiffness is needed" result). The MuJoCo run itself is deterministic, so we use
+# a fixed grid (to expose sensitivity / branch-jumps) AND a seeded Monte-Carlo
+# (to quantify the real-world outcome distribution).
+CHAOS_DELTA_L = 0.020              # m — fixed tendon pull for the study (20 mm)
+CHAOS_IC_RANGE_DEG = (-1.0, 1.0)  # initial-angle perturbation bounds [deg]
+CHAOS_IC_GRID_STEP_DEG = 0.1      # grid step [deg] -> 21 points over the range
+CHAOS_RANDOM_N = 300              # Monte-Carlo samples for the all-joints case
+CHAOS_RANDOM_SEED = 0             # RNG seed — reproducible random sweep
+CHAOS_BASELINE_K = SPRING_2       # N·m/rad — uniform non-zero baseline stiffness
+CHAOS_RAMP_TIME = 1.0             # s — quasi-static ΔL ramp (servo-like)
+CHAOS_HOLD_TIME = 2.0             # s — settle hold after the ramp
+CHAOS_GRAVITY = False             # match the validated gravity-free fidelity model
+
+# =====================================================================
+# 10. TENDON-SHEATH & PIN FRICTION  —  high_fidelity/chaos_study.py
+# =====================================================================
+# The ideal fidelity model is frictionless: every joint feels the SAME tendon
+# tension, so a zero-stiffness closure is a near-simultaneous dead heat. Real
+# hardware is not — and two GROUNDED, MEASURABLE friction sources break that
+# symmetry. They are the leading candidate for the non-repeatable hardware close.
+#
+#   (a) CAPSTAN (tendon-in-sheath) friction.  Where the tendon wraps each joint
+#       it loses tension by the capstan law  T_out = T_in · e^(-mu·Phi), with
+#       Phi = wrap angle at that joint (≈ the joint's own flexion + a small
+#       resting routing wrap). Tension is therefore HIGHEST at the actuator
+#       (proximal/MCP) and WEAKEST at the tip (distal/DIP): distal joints are
+#       under-driven, and the deficit grows with curl. Modelled as an opposing
+#       joint torque  ARM · T · (1 - e^(-mu·Phi_upstream))  folded into
+#       dof_frictionloss (so it is strictly dissipative).
+#       PROVENANCE of mu (the only genuinely new number):
+#         * direct two-end test — clamp the joints rigid, drive the tendon with
+#           the servo, read the far-end tension on the Futek load cell; regress
+#           ln(T_in/T_out) against total wrap ΣPhi → slope = mu (offset-free).
+#         * sanity band by material pair: PTFE/Teflon-lined sheath + steel cable
+#           mu≈0.04-0.10; bare nylon/Delrin mu≈0.15-0.25; bare metal mu≈0.2-0.4.
+#       The wrap angles Phi are GEOMETRY (joint angles + routing), NOT free knobs.
+#
+#   (b) PIN (hinge) Coulomb friction.  Even with pins, each hinge has a dry
+#       breakaway torque tau_c. Modelled directly as MuJoCo dof_frictionloss.
+#       PROVENANCE: per-joint breakaway test (tendon detached) — hang a known
+#       mass at a known moment arm, raise until the joint just rotates,
+#       tau_c = m·g·L. Equivalently the half-width of the torque-angle hysteresis
+#       loop when driving the bare joint slowly back and forth.
+#
+# RIGOROUS TIE-DOWN (so these are not tuned in a vacuum): fit (mu, tau_c) so the
+# SIMULATED ΔL→tendon-tension hysteresis loop matches the MEASURED one (load then
+# unload the tendon over the full ΔL, logging servo-side tension vs ΔL). The loop
+# WIDTH is set by total friction; the distal CURL SKEW by the capstan gradient —
+# fitting both uses the friction's entire observable footprint, not one point.
+# Then report the chaos result as a BAND over FRICTION_MU_SWEEP, carrying the
+# measurement uncertainty into the conclusion instead of trusting a single value.
+FRICTION_ENABLED = False              # opt-in; the primary chaos study stays frictionless
+FRICTION_MU_TENDON = 0.10             # capstan tendon-sheath coeff [-] — REPLACE with the
+                                      #   measured ln(T_in/T_out)/ΣPhi slope. Default = mid
+                                      #   PTFE-lined-sheath prior pending that measurement.
+FRICTION_REST_WRAP_DEG = 0.0          # resting wrap per joint at θ=0 [deg] from the palmar
+                                      #   routing offset (refine from CAD; 0 = ignore).
+FRICTION_PIN_TORQUE = (0.002, 0.002, 0.002)  # per-joint pin Coulomb torque [N·m] — REPLACE
+                                      #   with the per-joint breakaway measurements.
+FRICTION_MU_SWEEP = (0.05, 0.10, 0.20)       # capstan-coeff band (low/nominal/high) for the
+                                      #   sensitivity report — propagate measured ±uncertainty.
