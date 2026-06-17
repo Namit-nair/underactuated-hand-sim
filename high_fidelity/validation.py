@@ -193,9 +193,10 @@ def mujoco_equilibrium(k_vec, delta_L):
 
 
 def build_rho_grid():
+    n = config.SWEEP_N_PER_INTERVAL
     log_low, log_mid, log_high = np.log10([RHO_LOW, RHO_MID, RHO_HIGH])
-    lower = np.linspace(log_low, log_mid, 4)
-    upper = np.linspace(log_mid, log_high, 4)[1:]
+    lower = np.linspace(log_low, log_mid, n + 2)
+    upper = np.linspace(log_mid, log_high, n + 2)[1:]
     return 10 ** np.concatenate([lower, upper])
 
 

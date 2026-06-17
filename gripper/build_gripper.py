@@ -72,8 +72,10 @@ def _com(P, nm):
     return f'{c[0]:.6f} {c[1]:.6f} {c[2]:.6f}'
 
 
+_MASS_MAP = {"proximal": config.PROXIMAL_MASS, "middle": config.MIDDLE_MASS, "distal": config.DISTAL_MASS}
+
 def _mass(P, nm):
-    return P["inertial"][nm]["m"]
+    return _MASS_MAP[nm]
 
 
 def _v3(a):

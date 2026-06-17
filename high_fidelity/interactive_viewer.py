@@ -36,6 +36,7 @@ from config import (  # noqa: E402
     MCP_DAMPING, PIP_DAMPING, DIP_DAMPING,
     MCP_RANGE, PIP_RANGE, DIP_RANGE,
     TIMESTEP, INTEGRATOR, GRAVITY,
+    PROXIMAL_MASS, MIDDLE_MASS, DISTAL_MASS,
 )
 # The interactive viewer uses the soft, visual spatial tendon (not the stiff
 # physics-fidelity tendon that finger_model.py swaps in).
@@ -77,7 +78,8 @@ def _build_xml():
     def com(nm):
         c = P["inertial"][nm]["com_body"]
         return f'{c[0]:.6f} {c[1]:.6f} {c[2]:.6f}'
-    def mass(nm): return P["inertial"][nm]["m"]
+    _mass_override = {"proximal": PROXIMAL_MASS, "middle": MIDDLE_MASS, "distal": DISTAL_MASS}
+    def mass(nm): return _mass_override[nm]
     def v3(a):    return f'{a[0]:.6f} {a[1]:.6f} {a[2]:.6f}'
     def rng(r):
         return f'{r[0]*math.pi/180:.5f} {r[1]*math.pi/180:.5f}'
