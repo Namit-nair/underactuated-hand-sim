@@ -39,11 +39,3 @@ gripper/load_test.xml
 .dual-graph/
 .dual-graph-context/
 PROJECT_MEMORY.md
-
-# Agent-specific instruction files (kept local, never committed)
-AGENTS.md
-GEMINI.md
-CLAUDE.md
-CODEX.md
-CONTEXT.md
-.github/copilot-instructions.md
