@@ -38,17 +38,21 @@ MOCAP_SLAVE = True
 # (0=base, 1=prox, 2=mid, 3=dist), so the existing MCP/PIP/DIP differencing and
 # zeroing work unchanged.
 #
-# As-built LED placement (reported by the user, given tip -> bottom per link):
-#   DIP / distal link : 6 at the tip, 4 at the bottom   -> near=4, far=6
-#   PIP / middle link : 3 at the tip, 5 at the bottom   -> near=5, far=3
-#   MCP / proximal link: 7 at the tip, 1 at the bottom  -> near=1, far=7
-#   base / palm       : 2 at the tip, 0 at the bottom   -> near=0, far=2
-# (near = nearer the palm, far = nearer the fingertip; far - near points distally.)
+# As-built LED placement (CORRECTED): the finger is mounted end-for-end relative
+# to the first guess — the (0,2) pair is the FINGERTIP, not the base. The real
+# order runs base->tip from marker 6 down to marker 0, so the whole chain is
+# reversed AND each pair's near/far flips (the LED that pointed toward the old
+# "tip" actually points toward the real palm). near = nearer the palm, far =
+# nearer the fingertip; far - near points distally.
+#   base / palm        : near=6, far=4
+#   MCP / proximal link: near=3, far=5
+#   PIP / middle link  : near=7, far=1
+#   DIP / distal link  : near=2, far=0   (the (0,2) pair we first called "base")
 MOCAP_SEGMENT_MARKER_IDS = (
-    (0, 2),   # base / palm
-    (1, 7),   # proximal phalanx  (MCP link)
-    (5, 3),   # middle phalanx    (PIP link)
-    (4, 6),   # distal phalanx    (DIP link)
+    (6, 4),   # base / palm
+    (3, 5),   # proximal phalanx  (MCP link)
+    (7, 1),   # middle phalanx    (PIP link)
+    (2, 0),   # distal phalanx    (DIP link)
 )
 
 SEGMENT_LABELS = ("base", "prox", "mid", "dist")
@@ -65,7 +69,7 @@ SEGMENT_LABELS = ("base", "prox", "mid", "dist")
 # the single thing to get right is which axis points up.
 #
 # CHECK THIS LIVE: lift a marker off the table and watch which coordinate grows.
-MOCAP_VERTICAL_AXIS = 2      # which PhaseSpace axis is UP: 0=X, 1=Y, 2=Z
+MOCAP_VERTICAL_AXIS = 1      # which PhaseSpace axis is UP: 0=X, 1=Y, 2=Z
 MOCAP_VERTICAL_SIGN = +1     # +1 if that axis points up, -1 if it points down
 
 # --- servo ΔL travel --------------------------------------------------------

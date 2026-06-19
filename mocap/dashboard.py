@@ -157,21 +157,21 @@ class MocapDashboard(Dashboard):
         img[:] = (23, 17, 13)  # BGR of #0d1117
 
         th = self._last_theta
-        vals = [th.get(j) for j in ("mcp", "pip", "dip")]
         zeroed = self.joints.is_zeroed()
 
-        # Base/palm at the TOP, finger extending DOWN to the tip (180° flip of the
-        # natural pose plot). This is a whole-figure rotation, so the curl sense
-        # relative to the finger is preserved — only the base/tip ends swap place.
-        origin = np.array([w * 0.5, h * 0.30])
+        # Natural pose: palm/base at the bottom, finger pointing up, MCP at the
+        # base. The marker mapping in mocap_config is now correct end-for-end, so
+        # no viewer flip/swap is needed — joint i is physically joint i.
+        origin = np.array([w * 0.5, h * 0.84])
         seg_len = min(w, h) * 0.21
-        # palm stub (fixed, above the MCP pivot)
-        palm = origin + np.array([0.0, -seg_len * 0.5])
+        # palm stub (fixed, below the MCP pivot)
+        palm = origin + np.array([0.0, seg_len * 0.5])
         cv2.line(img, tuple(origin.astype(int)), tuple(palm.astype(int)),
                  (140, 148, 139), 3, cv2.LINE_AA)
 
         colors = [(0xff, 0xa6, 0x58), (0x7e, 0xe7, 0x87), (0x72, 0x7b, 0xff)]
         names = ("MCP", "PIP", "DIP")
+        vals = [th.get(j) for j in ("mcp", "pip", "dip")]
         p = origin.copy()
         cum = 0.0
         lost = False
@@ -181,9 +181,8 @@ class MocapDashboard(Dashboard):
                 lost = True
                 break
             cum += math.radians(vals[i])
-            # straight (cum=0) points DOWN: 180° flip of (sin, -cos) -> (-sin, cos),
-            # so base/palm is at the top and the tip hangs below.
-            nxt = p + seg_len * np.array([-math.sin(cum), math.cos(cum)])
+            # straight (cum=0) points up: (sin, -cos)
+            nxt = p + seg_len * np.array([math.sin(cum), -math.cos(cum)])
             cv2.line(img, tuple(p.astype(int)), tuple(nxt.astype(int)),
                      colors[i], 5, cv2.LINE_AA)
             cv2.putText(img, f"{names[i]} {vals[i]:+5.1f}",
