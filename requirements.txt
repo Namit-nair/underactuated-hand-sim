@@ -1,4 +1,15 @@
+# Core simulation & analytical model
 mujoco>=3.0.0
-numpy>=1.20.0
-matplotlib>=3.4.0
+numpy>=1.23.0
+matplotlib>=3.7.0
 scipy>=1.7.0
+
+# Gripper GUI (gripper/interactive_gripper.py, interactive_load_test.py)
+customtkinter>=5.0
+
+# Hardware rig (hardware/)
+PySide6>=6.5
+opencv-contrib-python>=4.7
+dynamixel-sdk>=3.8.4
+pyserial>=3.5
+pyrealsense2>=2.54
