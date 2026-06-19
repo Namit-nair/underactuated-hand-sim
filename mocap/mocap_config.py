@@ -72,6 +72,11 @@ SEGMENT_LABELS = ("base", "prox", "mid", "dist")
 MOCAP_VERTICAL_AXIS = 1      # which PhaseSpace axis is UP: 0=X, 1=Y, 2=Z
 MOCAP_VERTICAL_SIGN = +1     # +1 if that axis points up, -1 if it points down
 
+# Sign of the joint angles. Flexion (servo pull) should read POSITIVE; with the
+# as-built marker direction the pull comes out negative, so default to -1 to flip
+# it (the dashboard's "FLIP θ SIGN" button toggles this live).
+MOCAP_FLEXION_SIGN = -1      # +1 or -1
+
 # --- servo ΔL travel --------------------------------------------------------
 # Manual/GO/jog tendon-pull ceiling [mm]. The hardware dashboard hard-caps the
 # target field at 25 mm; the mocap rig raises it (and the servo soft cap) so the

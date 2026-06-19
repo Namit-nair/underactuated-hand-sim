@@ -120,6 +120,11 @@ class MocapDashboard(Dashboard):
         self.setWindowTitle("Finger MOCAP Validation Rig — PhaseSpace — IITGN")
         self.btn_conn_cam.setText("CONNECT MOCAP")
 
+        # Flexion (servo pull) reads positive: the as-built marker direction gives
+        # negative angles on pull, so set the mocap default sign from config (the
+        # base rig defaults to +1; "FLIP θ SIGN" still toggles it live).
+        self.joints.set_flexion_sign(mcfg.MOCAP_FLEXION_SIGN)
+
         # Raise the ΔL ceiling well past 70 mm (the base rig caps the target at
         # 25 mm). Lift both the spinbox max and the servo soft cap so manual GO /
         # jog can drive the tendon to MOCAP_MAX_DELTA_MM.
