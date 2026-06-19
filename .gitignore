@@ -31,6 +31,11 @@ plots/*
 logs/*
 !logs/.gitkeep
 
+# Mocap rig — per-setup calibration and result logs (regenerated, not source)
+mocap/mocap_calibration.json
+mocap/results/*
+!mocap/results/.gitkeep
+
 # Generated finger models — rebuilt from config.py on every run
 high_fidelity/finger.xml
 high_fidelity/_finger_fidelity.xml
