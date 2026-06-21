@@ -49,17 +49,43 @@ import config  # noqa: E402
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
+import load_cell  # noqa: E402  (imported as a module so the patch below sticks)
+import servo  # noqa: E402  (ditto — autodetect_* call the module-level enumerator)
 from dashboard import _btn, _dspin, _group  # noqa: E402  (reuse widget helpers)
 from load_cell import LoadCell, MockLoadCell  # noqa: E402
 from logger import CsvLogger  # noqa: E402
 from servo import MockServo, Servo, open_bus  # noqa: E402
 
+
+# --- cross-platform serial-port enumeration ---------------------------------
+# servo.autodetect_servo / load_cell.autodetect_loadcell scan every port + baud,
+# so port="auto" binds the device regardless of which port it landed on. The one
+# gap is that both modules' list_serial_ports() globs the Linux /dev/ttyUSB*
+# paths; on Windows the U2D2 and the USB220 enumerate as COMx. We patch the port
+# enumerator (in-process only — servo.py / load_cell.py are untouched) to use
+# pyserial's cross-platform comports(), falling back to the Linux globs.
+def _list_serial_ports_xplat():
+    try:
+        from serial.tools import list_ports
+        ports = sorted(p.device for p in list_ports.comports())
+        if ports:
+            return ports
+    except Exception:  # noqa: BLE001
+        pass
+    import glob
+    return sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+
+
+servo.list_serial_ports = _list_serial_ports_xplat
+load_cell.list_serial_ports = _list_serial_ports_xplat
+
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
-from PySide6.QtGui import QFont  # noqa: E402
+from PySide6.QtGui import QFont, QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
+    QComboBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -170,6 +196,7 @@ class LoadTestDashboard(QMainWindow):
 
         # ---- RIGHT: controls (scrollable) ----
         right = QVBoxLayout()
+        right.addWidget(self._banner())
         right.addWidget(self._connect_group())
         right.addWidget(self._tension_group())
         right.addWidget(self._sensor_group())
@@ -189,6 +216,19 @@ class LoadTestDashboard(QMainWindow):
 
         self.setCentralWidget(central)
         self._init_plots()
+
+    def _banner(self):
+        a_id, b_id = self.finger_ids
+        pull_id = getattr(self.pull, "dxl_id", config.PULL_DXL_ID)
+        lbl = QLabel(
+            f"Fingers {config.GRIPPER_APERTURE_MAX_MM:.0f} mm apart   ·   "
+            f"A=id{a_id}  B=id{b_id} (U2D2-1)   ·   "
+            f"pull=id{pull_id} (U2D2-2)   ·   Futek LCM300")
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet(
+            "color:#8b949e; background-color:#161b22; border:1px solid #30363d;"
+            "border-radius:4px; padding:6px; font-family:Consolas; font-size:11px;")
+        return lbl
 
     def _connect_group(self):
         g = _group("CONNECTION", "#00d4ff")
@@ -214,7 +254,8 @@ class LoadTestDashboard(QMainWindow):
         return g
 
     def _tension_group(self):
-        g = _group("TENDON TENSIONING  (take up slack, then SET ZERO)", "#3fb950")
+        g = _group("TENSIONING  (take up slack on each tendon + string, then SET ZERO)",
+                   "#3fb950")
         grid = QGridLayout()
         grid.addWidget(QLabel("jog step"), 0, 0)
         self.jog_step = _dspin(0.002, 0.5, 0.01, 0.002, " rev")
@@ -223,10 +264,8 @@ class LoadTestDashboard(QMainWindow):
         b_step_up = _btn("+")
         b_step_down.setFixedWidth(28)
         b_step_up.setFixedWidth(28)
-        b_step_down.clicked.connect(lambda: self.jog_step.setValue(
-            max(self.jog_step.value() / 2, self.jog_step.minimum())))
-        b_step_up.clicked.connect(lambda: self.jog_step.setValue(
-            min(self.jog_step.value() * 2, self.jog_step.maximum())))
+        b_step_down.clicked.connect(self._jog_step_down)
+        b_step_up.clicked.connect(self._jog_step_up)
         grid.addWidget(b_step_down, 0, 2)
         grid.addWidget(b_step_up, 0, 3)
 
@@ -247,6 +286,33 @@ class LoadTestDashboard(QMainWindow):
         b_both = _btn("◎ SET ZERO BOTH (tensioned)", "#3fb950", border="#3fb950")
         b_both.clicked.connect(self._zero_both)
         grid.addWidget(b_both, 3, 0, 1, 4)
+
+        # Pull-string (sensor-end) servo: same pre-tension UX as the fingers —
+        # jog to take up string slack so the cell reads ~0 at the start, then
+        # SET ZERO so the pull ΔL begins at the object.
+        grid.addWidget(QLabel("pull string"), 4, 0)
+        b_pminus = _btn("◀ −")
+        b_pplus = _btn("+ ▶")
+        b_pzero = _btn("◎ SET ZERO", "#3fb950", border="#3fb950")
+        b_pminus.clicked.connect(lambda: self._jog_pull(-1))
+        b_pplus.clicked.connect(lambda: self._jog_pull(+1))
+        b_pzero.clicked.connect(self._zero_pull)
+        grid.addWidget(b_pminus, 4, 1)
+        grid.addWidget(b_pplus, 4, 2)
+        grid.addWidget(b_pzero, 4, 3)
+
+        # Keyboard jog: ←/→ jog the selected target, ↑/↓ scale the step, space
+        # E-stops. The selector picks what the arrows drive.
+        grid.addWidget(QLabel("⌨ jog target"), 5, 0)
+        self.kbd_target = QComboBox()
+        self.kbd_target.addItems(["both fingers", "finger A", "finger B", "pull"])
+        self.kbd_target.setStyleSheet(
+            "QComboBox{background:#161b22; color:#c9d1d9; border:1px solid #30363d;"
+            "padding:2px;}")
+        grid.addWidget(self.kbd_target, 5, 1, 1, 2)
+        hint = QLabel("←/→ jog · ↑/↓ step · space=stop")
+        hint.setStyleSheet("color:#6e7681; font-size:10px;")
+        grid.addWidget(hint, 5, 3)
         g.setLayout(grid)
         return g
 
@@ -506,6 +572,25 @@ class LoadTestDashboard(QMainWindow):
                 s.set_zero()
         self._maybe_tensioned()
 
+    def _jog_pull(self, direction):
+        if not self.pull.get_state().get("connected"):
+            return
+        ok, msg = self.pull.jog(direction, step_rev=float(self.jog_step.value()))
+        if not ok:
+            self.statusBar().showMessage(f"pull: {msg}", 2500)
+
+    def _zero_pull(self):
+        if self.pull.get_state().get("connected"):
+            self.pull.set_zero()
+
+    def _jog_step_up(self):
+        self.jog_step.setValue(
+            min(self.jog_step.value() * 2, self.jog_step.maximum()))
+
+    def _jog_step_down(self):
+        self.jog_step.setValue(
+            max(self.jog_step.value() / 2, self.jog_step.minimum()))
+
     def _maybe_tensioned(self):
         if (self.fa.get_state().get("connected")
                 and self.fb.get_state().get("connected")
@@ -711,6 +796,38 @@ class LoadTestDashboard(QMainWindow):
                 flags.append(f"{nm}:OVERCUR")
         if flags:
             self.lbl_conn.setText("  ".join(flags))
+
+    # =================================================================
+    # keyboard
+    # =================================================================
+    def _kbd_jog(self, direction):
+        target = self.kbd_target.currentText()
+        if target == "finger A":
+            self._jog_finger("a", direction)
+        elif target == "finger B":
+            self._jog_finger("b", direction)
+        elif target == "pull":
+            self._jog_pull(direction)
+        else:  # both fingers (default)
+            self._jog_finger("a", direction)
+            self._jog_finger("b", direction)
+
+    def keyPressEvent(self, e: QKeyEvent):
+        if e.isAutoRepeat():
+            return
+        k = e.key()
+        if k == Qt.Key_Space:
+            self._estop_all()
+        elif k == Qt.Key_Right:
+            self._kbd_jog(+1)
+        elif k == Qt.Key_Left:
+            self._kbd_jog(-1)
+        elif k == Qt.Key_Up:
+            self._jog_step_up()
+        elif k == Qt.Key_Down:
+            self._jog_step_down()
+        else:
+            super().keyPressEvent(e)
 
     def closeEvent(self, e):
         for s in (self.fa, self.fb, self.pull):
