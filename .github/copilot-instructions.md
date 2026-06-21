@@ -32,6 +32,12 @@ an anthropomorphic 3-joint (MCP / PIP / DIP) model, plus a hardware-validation r
   viewer, and validation suite. Results auto-write to `high_fidelity/validation_results/`.
 - **Hardware rig:** `hardware/` — PySide6 dashboard, Dynamixel servo, RealSense
   + ArUco joint-angle measurement.
+- **Mocap rig:** `mocap/` — PhaseSpace (OWL2) optical tracking as an alternative
+  joint-angle source. Self-contained: vendored `owl.py`, `tracker.py`
+  (`PhaseSpaceTracker`/`MockTracker`), `dashboard.py` (subclasses the hardware
+  `Dashboard`, reusing servo/logger/predictor/joints/auto-sweep verbatim),
+  `calibrate.py`, and `mocap_config.py` (mocap-only knobs; physical params still
+  come from root `config.py`). Results write to `mocap/results/`.
 
 When finger geometry or mechanics change, update **both** the high-fidelity model
 **and** the analytical validation so they stay consistent.
@@ -55,6 +61,18 @@ When finger geometry or mechanics change, update **both** the high-fidelity mode
   average `N_AVG_SAMPLES` detections with a wrap-safe circular mean per marker.
 - **RE-ZERO-theta feature was removed** from the dashboard; auto-sweep advances directly.
   Don't re-add it.
+- **PhaseSpace = labeled POINT markers, not rigid bodies.** Two LEDs per segment
+  on four segments (base/prox/mid/dist). A per-segment rigid body is impossible
+  here — the OWL SDK needs ≥4 markers for a 6-DOF body (`owl.py`), and we only
+  need each segment's direction vector. `tracker.py` projects each 3D segment
+  vector onto the flexion plane and reports a per-segment in-plane angle, so the
+  existing `joints.py` differencing/zeroing is reused unchanged. The finger
+  flexes in a FIXED horizontal plane (no abduction), so the plane normal is the
+  lab vertical axis — set once via `MOCAP_VERTICAL_AXIS`/`MOCAP_VERTICAL_SIGN`,
+  NO calibration flex. Only the normal affects joint angles (they difference
+  consecutive segment angles → invariant to the in-plane long-axis reference,
+  which is derived live from the stationary base markers). Residual marker
+  pitch/yaw is removed by the projection + the straight-pose Set Zero.
 
 > Live/evolving decisions beyond this list live in the dual-graph MCP store and
 > `CONTEXT.md` (see Shared Memory below). This list is for the stable, load-bearing ones.
@@ -77,6 +95,10 @@ python3 high_fidelity/validation.py
 
 # Hardware dashboard (real RealSense + Dynamixel)
 python3 hardware/dashboard.py          # add --mock to run with no hardware
+
+# Mocap dashboard (PhaseSpace optical tracking + Dynamixel)
+python3 mocap/dashboard.py             # add --mock for synthetic mocap + servo
+python3 mocap/calibrate.py --seconds 5 # CHECK plane / confirm which axis is up
 
 # Analyze a hardware-validation sweep CSV (M12/M32 agreement, errors, repeatability)
 python3 high_fidelity/analyze_hw_validation.py   # picks latest dataset by default

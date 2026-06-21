@@ -50,6 +50,19 @@ mujoco_simulations/
 │   ├── meshes/               # proximal/middle/distal STL meshes
 │   └── validation_results/   # Plots + CSVs written by validation.py
 │
+├── hardware/                 # Physical validation rig: PySide6 dashboard,
+│   │                         # Dynamixel servo, RealSense + ArUco joint angles,
+│   │                         # load-carrying (pull-out) test dashboard
+│   └── README.md
+│
+├── mocap/                    # PhaseSpace (OWL2) optical-tracking validation rig:
+│   │                         # alternative joint-angle source, reuses the hardware
+│   │                         # dashboard/servo/logger (see mocap/README.md)
+│   └── README.md
+│
+├── gripper/                  # Gripper development: build_gripper.py + headless
+│                             # stiffness-ratio holding-capacity (Tmax) sweep
+│
 └── legacy/                   # Initial low-fidelity model + early research outputs
                               # (kept for reference; see legacy/README.md)
 ```
