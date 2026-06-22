@@ -172,7 +172,17 @@ def autodetect_servo(
     for port in ports:
         port_handler = PortHandler(port)
         packet_handler = PacketHandler(protocol)
-        if not port_handler.openPort():
+        # serial.tools.list_ports.comports() (used by the dashboards' x-platform
+        # enumerator) surfaces phantom/legacy nodes — e.g. the onboard /dev/ttyS*
+        # ports on Linux — whose openPort() RAISES a low-level OS error instead of
+        # returning False. Skip any port we can't open so one bad node doesn't
+        # abort the whole scan (mirrors autodetect_loadcell). SerialException is an
+        # OSError subclass, so this also covers pyserial's own failures.
+        try:
+            opened = port_handler.openPort()
+        except OSError:
+            continue
+        if not opened:
             continue
         try:
             for baud in bauds:
@@ -248,6 +258,46 @@ def open_bus(
 
     return (True, port_handler, packet_handler, found_port, found_baud, ids,
             f"bus open on {found_port} @ {found_baud} baud, ids {ids}")
+
+
+def install_emergency_shutdown(cleanup):
+    """Run ``cleanup`` on *any* process exit, not just a clicked window close.
+
+    Qt only calls a window's ``closeEvent`` when the GUI is closed normally
+    (the ✕ button). If the operator Ctrl-C's the terminal, or the process is
+    sent SIGTERM, ``closeEvent`` never fires and the Dynamixels stay energised
+    holding their last position. This wires the same ``cleanup`` (torque-off +
+    disconnect) into:
+
+      * :mod:`atexit` — runs on every normal interpreter shutdown, including
+        after the Qt loop ends or after a KeyboardInterrupt unwinds; and
+      * the SIGINT / SIGTERM handlers — so a terminal Ctrl-C or a ``kill``
+        de-energises the motors before the process dies.
+
+    ``cleanup`` MUST be idempotent (guard it with a "already done" flag): it can
+    be invoked from both a signal and atexit, and from ``closeEvent`` too. The
+    dashboards run a periodic QTimer, which returns control to Python often
+    enough that the Python signal handler actually fires while Qt's C++ event
+    loop is running. Signal handlers can only be installed from the main thread;
+    failures there are ignored (atexit still covers the exit).
+    """
+    import atexit
+    import signal
+
+    atexit.register(cleanup)
+
+    def _handler(signum, _frame):
+        cleanup()
+        # Restore the default disposition and re-raise so the process exits the
+        # way it normally would for this signal (Qt loop tears down, etc.).
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for _sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(_sig, _handler)
+        except (ValueError, OSError):  # not main thread / unsupported platform
+            pass
 
 
 class SoftLimitError(ValueError):
