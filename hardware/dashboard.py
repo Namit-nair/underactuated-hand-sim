@@ -43,7 +43,7 @@ import predictor  # noqa: E402
 from camera import MARKER_LABELS, MockCamera, RealSenseAruco  # noqa: E402
 from joints import JointAngles  # noqa: E402
 from logger import CsvLogger  # noqa: E402
-from servo import MockServo, Servo  # noqa: E402
+from servo import MockServo, Servo, install_emergency_shutdown  # noqa: E402
 from state_machine import AutoSweep, SettleDetector, State  # noqa: E402
 
 # --- Qt / matplotlib ---------------------------------------------------------
@@ -236,6 +236,12 @@ class Dashboard(QMainWindow):
 
         self._refresh_spring_readout()
         self._set_state(State.IDLE)
+
+        # Kill the servo on ANY exit (Ctrl-C / SIGTERM too), not just a clicked
+        # window close — otherwise the motor stays energised after the process
+        # dies. _shutdown is idempotent so closeEvent + atexit + signal are safe.
+        self._shutdown_done = False
+        install_emergency_shutdown(self._shutdown)
 
     def _grab_focus(self):
         """Return keyboard focus to the window so ←/→ jog again (e.g. after a
@@ -1061,7 +1067,12 @@ class Dashboard(QMainWindow):
         else:
             super().keyReleaseEvent(e)
 
-    def closeEvent(self, e):
+    def _shutdown(self):
+        """Torque-off + disconnect the servo and release devices. Idempotent:
+        safe to call from closeEvent, atexit, and a signal handler."""
+        if getattr(self, "_shutdown_done", False):
+            return
+        self._shutdown_done = True
         try:
             self.servo.disable()
             self.servo.disconnect()
@@ -1073,6 +1084,9 @@ class Dashboard(QMainWindow):
             pass
         if self.logger:
             self.logger.close()
+
+    def closeEvent(self, e):
+        self._shutdown()
         super().closeEvent(e)
 
 
