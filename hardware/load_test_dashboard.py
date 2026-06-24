@@ -159,14 +159,6 @@ class LoadTestDashboard(QMainWindow):
         self.trial_idx = self._next_trial_number()
         self.capacity_n = float("nan")     # latched load capacity (last release)
         self._run_peak = 0.0               # running peak force during a pull
-        # Active auto-tension probes: key -> probe state (phase, baseline samples,
-        # collected (ΔL, current) points). A finger is probing while it has an
-        # entry here; the tick loop fits + extrapolates, then drops the entry.
-        self._tension_seek = {}
-        # Last completed probe result per finger: key -> dict(slope, i0, knee).
-        # Kept so we can report how evenly the two fingers tensioned (matching
-        # fitted slopes ⇒ matching mechanics) once both have finished.
-        self._tension_results = {}
         self._bus_handles = None           # (port_handler, packet_handler) if shared
         self._mock_released = False
         self._t0 = time.monotonic()
@@ -221,6 +213,7 @@ class LoadTestDashboard(QMainWindow):
         right = QVBoxLayout()
         right.addWidget(self._banner())
         right.addWidget(self._connect_group())
+        right.addWidget(self._stiffness_group())
         right.addWidget(self._tension_group())
         right.addWidget(self._sensor_group())
         right.addWidget(self._grip_group())
@@ -276,6 +269,49 @@ class LoadTestDashboard(QMainWindow):
         g.setLayout(lay)
         return g
 
+    def _stiffness_group(self):
+        g = _group("STIFFNESS  (which hardware springs are installed)", "#bc8cff")
+        grid = QGridLayout()
+        grid.addWidget(QLabel("spring set"), 0, 0)
+        self.stiffness_combo = QComboBox()
+        self.stiffness_combo.addItems(list(config.LOAD_TEST_STIFFNESS_CONFIGS))
+        self.stiffness_combo.setStyleSheet(
+            "QComboBox{background:#161b22; color:#c9d1d9; border:1px solid #30363d;"
+            "padding:2px;}")
+        if config.LOAD_TEST_STIFFNESS_DEFAULT in config.LOAD_TEST_STIFFNESS_CONFIGS:
+            self.stiffness_combo.setCurrentText(config.LOAD_TEST_STIFFNESS_DEFAULT)
+        self.stiffness_combo.currentTextChanged.connect(self._on_stiffness_changed)
+        grid.addWidget(self.stiffness_combo, 0, 1, 1, 3)
+        # Resolved per-joint values for the chosen set — these are what get logged.
+        self.lbl_stiffness = QLabel()
+        self.lbl_stiffness.setStyleSheet("color:#8b949e; font-size:10px;")
+        self.lbl_stiffness.setWordWrap(True)
+        grid.addWidget(self.lbl_stiffness, 1, 0, 1, 4)
+        g.setLayout(grid)
+        self._update_stiffness_label()
+        return g
+
+    def _selected_stiffness(self):
+        """(k_mcp, k_pip, k_dip) [N·m/rad] for the chosen spring set.
+
+        Falls back to the config.py per-joint defaults if the selected key is
+        somehow missing (e.g. the dict was edited while the panel was open).
+        """
+        key = self.stiffness_combo.currentText()
+        return config.LOAD_TEST_STIFFNESS_CONFIGS.get(
+            key, (config.MCP_STIFFNESS, config.PIP_STIFFNESS, config.DIP_STIFFNESS))
+
+    def _update_stiffness_label(self):
+        k_mcp, k_pip, k_dip = self._selected_stiffness()
+        self.lbl_stiffness.setText(
+            f"MCP {k_mcp:.3f} · PIP {k_pip:.3f} · DIP {k_dip:.3f}  N·m/rad "
+            f"(logged as k_mcp/k_pip/k_dip)")
+
+    def _on_stiffness_changed(self, _text):
+        self._update_stiffness_label()
+        self.statusBar().showMessage(
+            f"stiffness set → {self.stiffness_combo.currentText()}", 3000)
+
     def _tension_group(self):
         g = _group("TENSIONING  (take up slack on each tendon + string, then SET ZERO)",
                    "#3fb950")
@@ -309,30 +345,6 @@ class LoadTestDashboard(QMainWindow):
         b_both = _btn("◎ SET ZERO BOTH (tensioned)", "#3fb950", border="#3fb950")
         b_both.clicked.connect(self._zero_both)
         grid.addWidget(b_both, 3, 0, 1, 4)
-
-        # Auto-tension by current ONSET: each finger winds slowly until its motor
-        # current starts to flicker above zero (tendon just bearing load), then
-        # ΔL=0 is set at that onset and the finger relaxes back to it. No curling —
-        # it stops right at the threshold. Both fingers use the same criterion, so
-        # both zero at their own true threshold → even. "engage current" is the
-        # mA floor above which the tendon counts as bearing load (a few mA).
-        grid.addWidget(QLabel("engage current"), 7, 0)
-        self.engage_ma = _dspin(1.0, 50.0, config.TENSION_ENGAGE_MA, 1.0, " mA")
-        grid.addWidget(self.engage_ma, 7, 1)
-        b_auto_a = _btn("⚙ A", "#3fb950", border="#3fb950")
-        b_auto_b = _btn("⚙ B", "#3fb950", border="#3fb950")
-        b_auto_a.clicked.connect(lambda: self._auto_tension(["a"]))
-        b_auto_b.clicked.connect(lambda: self._auto_tension(["b"]))
-        grid.addWidget(b_auto_a, 7, 2)
-        grid.addWidget(b_auto_b, 7, 3)
-        self.btn_auto_both = _btn("⚙ AUTO-TENSION BOTH → even threshold",
-                                  "#0d1117", "#3fb950", "#3fb950")
-        self.btn_auto_both.clicked.connect(lambda: self._auto_tension(["a", "b"]))
-        grid.addWidget(self.btn_auto_both, 8, 0, 1, 4)
-        self.lbl_tension = QLabel("auto-tension idle")
-        self.lbl_tension.setStyleSheet("color:#6e7681; font-size:10px;")
-        self.lbl_tension.setWordWrap(True)
-        grid.addWidget(self.lbl_tension, 9, 0, 1, 4)
 
         # Pull-string (sensor-end) servo: same pre-tension UX as the fingers —
         # jog to take up string slack so the cell reads ~0 at the start, then
@@ -657,118 +669,6 @@ class LoadTestDashboard(QMainWindow):
                 s.set_zero()
         self._maybe_tensioned()
 
-    def _auto_tension(self, keys):
-        """Arm a current-onset auto-tension on each named finger.
-
-        Each armed finger ramps slowly outward while the tick loop watches its
-        present current. While the tendon is slack the current sits at ~0 mA; the
-        instant it starts bearing load the current flickers above the engage
-        floor. When that activity is sustained, ΔL=0 is set at the ONSET (the ΔL
-        of the first above-floor sample, not the confirmation point) and the
-        finger relaxes back to it — no curling. Both fingers use the same
-        criterion, so both zero at their own true threshold → even.
-        """
-        armed = []
-        for key in keys:
-            s = self._finger(key)
-            if not s.get_state().get("connected"):
-                self.statusBar().showMessage(
-                    f"finger {key.upper()}: connect first", 2500)
-                continue
-            if getattr(s, "_estop", False):
-                s.enable()  # clear a latched estop so the wind can proceed
-            delta0 = s.current_delta_L_mm()
-            target = min(delta0 + config.TENSION_PROBE_MAX_MM,
-                         s.soft_delta_l_cap_mm)
-            if not s.start_ramp(target, speed_mm_s=config.TENSION_WIND_SPEED_MM_S):
-                self.statusBar().showMessage(
-                    f"finger {key.upper()}: wind ramp refused (soft cap?)", 3000)
-                continue
-            self._tension_seek[key] = {
-                "delta0": delta0,
-                "onset_delta": None,   # ΔL at the first above-floor sample (locked candidate)
-                "hits": 0,             # above-floor samples accumulated since that onset
-            }
-            self._tension_results.pop(key, None)  # stale until this wind finishes
-            armed.append(key.upper())
-        if armed:
-            self.lbl_tension.setText(
-                f"tensioning {', '.join(armed)} (winding to tendon engagement)…")
-            self.lbl_tension.setStyleSheet("color:#3fb950; font-size:10px;")
-
-    def _service_tension_seek(self, states):
-        """Advance any active auto-tension winds. Called once per tick.
-
-        ``states`` maps finger key -> its serviced state dict. Per finger: the ΔL
-        of the first above-floor current sample is locked as the onset candidate
-        (slack is a clean zero, so the first nonzero flicker is real contact).
-        Above-floor samples then accumulate; MIN_HITS of them confirm engagement
-        and we zero at the locked onset. If confirmation doesn't arrive within
-        SPIKE_MM more of winding the candidate was a spike and is dropped. Gives
-        up (relaxes back) if the wind reaches its travel limit without engaging.
-        """
-        if not self._tension_seek:
-            return
-        floor = float(self.engage_ma.value())
-        for key in list(self._tension_seek.keys()):
-            seek = self._tension_seek[key]
-            s = self._finger(key)
-            st = states[key]
-            cur = abs(st.get("current_ma", 0.0))
-            here = s.current_delta_L_mm()
-
-            if cur > floor:
-                if seek["onset_delta"] is None:
-                    seek["onset_delta"] = here     # first contact — lock the zero candidate
-                seek["hits"] += 1
-
-            if (seek["onset_delta"] is not None
-                    and seek["hits"] >= config.TENSION_ENGAGE_MIN_HITS):
-                self._finish_engage(key, s, seek)
-            elif (seek["onset_delta"] is not None
-                  and here - seek["onset_delta"] > config.TENSION_ENGAGE_SPIKE_MM):
-                seek["onset_delta"] = None         # never confirmed → it was a spike
-                seek["hits"] = 0
-            elif not st.get("ramping", False):     # hit travel limit, never engaged
-                self._finish_engage(key, s, seek, gave_up=True)
-
-    def _finish_engage(self, key, s, seek, gave_up=False):
-        """Zero at the detected engagement onset and relax back (or abort)."""
-        del self._tension_seek[key]
-        if gave_up or seek["onset_delta"] is None:
-            s.start_ramp(seek["delta0"], speed_mm_s=self.finger_speed)  # back off
-            self._on_seek_done(
-                key, f"⚠ {key.upper()} no engagement within "
-                     f"{config.TENSION_PROBE_MAX_MM:.0f} mm — check tendon slack / "
-                     f"wind direction (⇄ {key.upper()}).")
-            return
-        onset = seek["onset_delta"]
-        s.rezero_at_delta(onset)                       # ΔL=0 at the engagement onset
-        s.start_ramp(0.0, speed_mm_s=self.finger_speed)  # relax back to the threshold
-        self._maybe_tensioned()
-        wound = onset - seek["delta0"]
-        self._tension_results[key] = {"onset": float(onset), "wound": float(wound)}
-        self._on_seek_done(
-            key, f"{key.upper()} zeroed at engagement (slack taken up "
-                 f"{wound:+.1f} mm)")
-
-    def _on_seek_done(self, key, message):
-        """Report one finger's result; add an A↔B summary once both have finished."""
-        if self._tension_seek:
-            self.lbl_tension.setText(message)
-            self.lbl_tension.setStyleSheet("color:#3fb950; font-size:10px;")
-            self.statusBar().showMessage(message, 5000)
-            return
-        ra, rb = self._tension_results.get("a"), self._tension_results.get("b")
-        if ra and rb:
-            message += (f"  ·  both at threshold (A took up {ra['wound']:+.1f} mm, "
-                        f"B {rb['wound']:+.1f} mm)")
-        else:
-            message += "  ·  auto-tension done"
-        self.lbl_tension.setText(message)
-        self.lbl_tension.setStyleSheet("color:#3fb950; font-size:10px;")
-        self.statusBar().showMessage(message, 6000)
-
     def _jog_pull(self, direction):
         if not self.pull.get_state().get("connected"):
             return
@@ -893,7 +793,6 @@ class LoadTestDashboard(QMainWindow):
             self.lbl_pull.setText("pull stopped")
 
     def _estop_all(self):
-        self._tension_seek.clear()  # abort any in-flight auto-tension seeks
         for s in (self.fa, self.fb, self.pull):
             try:
                 s.e_stop()
@@ -941,6 +840,7 @@ class LoadTestDashboard(QMainWindow):
     def _log_row(self, event, force, raw, peak, sa, sb, sp):
         if self.logger is None:
             return
+        k_mcp, k_pip, k_dip = self._selected_stiffness()
         self.logger.log({
             "timestamp": datetime.now().isoformat(timespec="milliseconds"),
             "trial_idx": self.trial_idx,
@@ -957,9 +857,9 @@ class LoadTestDashboard(QMainWindow):
             "finger_b_current_ma": sb.get("current_ma"),
             "pull_dL_mm": sp.get("delta_L_mm"),
             "pull_current_ma": sp.get("current_ma"),
-            "k_mcp": config.MCP_STIFFNESS,
-            "k_pip": config.PIP_STIFFNESS,
-            "k_dip": config.DIP_STIFFNESS,
+            "k_mcp": k_mcp,
+            "k_pip": k_pip,
+            "k_dip": k_dip,
         })
 
     # =================================================================
@@ -973,9 +873,6 @@ class LoadTestDashboard(QMainWindow):
         sa = self.fa.service(dt)
         sb = self.fb.service(dt)
         sp = self.pull.service(dt)
-
-        # Advance any active auto-tension seeks (currents are now fresh).
-        self._service_tension_seek({"a": sa, "b": sb})
 
         # Mock plant: synthesise the axial force from grip vs pull ΔL so the real
         # release-detection path (force-drop) can be exercised with no hardware.

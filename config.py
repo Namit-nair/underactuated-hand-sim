@@ -331,27 +331,23 @@ PULL_SPOOL_RADIUS = SPOOL_RADIUS        # m — TODO: set once the pull horn/spo
 PULL_SPEED_MM_S = 2.0                   # default string take-up (winding) speed
 PULL_MAX_DELTA_MM = 120.0               # pull-servo soft ΔL cap (string take-up range)
 
-# -- Auto-tensioning (detect tendon engagement by current onset) ------
-# Observed on the rig: while the tendon is slack the motor (holding position
-# under no load) reads a steady ~0 mA; the instant it starts to bear load the
-# present current begins to flicker just above zero (0→3→5 mA…). That onset of
-# sustained nonzero current activity is a crisp, CURL-FREE marker of the motion
-# threshold (cable just taut, finger still straight). Auto-tension winds each
-# finger slowly until that activity is sustained, sets ΔL=0 at the onset, and
-# relaxes back — so both fingers zero at their own true threshold → even.
-#
-# (This replaces the earlier probe-and-extrapolate scheme: the onset signal
-# locates the knee directly, so we never have to curl the finger to find it.)
-TENSION_WIND_SPEED_MM_S = 1.5         # slow wind while watching for engagement
-TENSION_PROBE_MAX_MM = 30.0           # give-up wind distance (also the ramp target)
-# Engage floor sits BELOW the 1-unit current quantum (2.69 mA for the XM430) so
-# the very first flicker ("0→3 mA") registers, but above a clean slack zero. The
-# onset (ΔL of the first above-floor sample) is locked as the zero candidate; it
-# is confirmed once MIN_HITS above-floor samples accumulate, or discarded as a
-# spike if confirmation doesn't arrive within SPIKE_MM more of winding.
-TENSION_ENGAGE_MA = 2.0               # current floor; readings above it = tendon bearing load
-TENSION_ENGAGE_MIN_HITS = 5           # above-floor samples (since onset) that confirm engagement
-TENSION_ENGAGE_SPIKE_MM = 2.0         # un-confirmed candidate onset is dropped after this much extra wind
+# -- Stiffness configurations (which hardware springs are installed) --
+# A load-test trial set is run with a chosen set of torsional springs at the
+# three finger joints. Each named configuration below maps a dropdown label to
+# the (MCP, PIP, DIP) spring stiffnesses [N·m/rad] physically installed for that
+# set — the name is just shorthand for the SPRING_1/2/3 values above. The
+# dashboard's selector reads this dict, and the chosen config's values are
+# logged per trial (k_mcp/k_pip/k_dip) so every CSV records which springs
+# produced it. Add or rename entries here as new spring combinations are tested.
+LOAD_TEST_STIFFNESS_CONFIGS = {
+    "Uniform — large (S1·S1·S1)":   (SPRING_1, SPRING_1, SPRING_1),
+    "Uniform — medium (S2·S2·S2)":  (SPRING_2, SPRING_2, SPRING_2),
+    "Uniform — small (S3·S3·S3)":   (SPRING_3, SPRING_3, SPRING_3),
+    "Graded stiff→soft (S1·S2·S3)": (SPRING_1, SPRING_2, SPRING_3),
+    "Graded soft→stiff (S3·S2·S1)": (SPRING_3, SPRING_2, SPRING_1),
+}
+# Selection shown on dashboard startup (must be a key of the dict above).
+LOAD_TEST_STIFFNESS_DEFAULT = "Uniform — medium (S2·S2·S2)"
 
 # -- Release detection ------------------------------------------------
 RELEASE_DROP_FRAC = 0.30                # force drop from the running peak that flags release
