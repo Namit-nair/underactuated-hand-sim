@@ -17,7 +17,7 @@ import os
 import re
 from datetime import datetime
 
-DEFAULT_OUT_DIR = "/home/namit/iitgn/mujoco_simulations/high_fidelity/validation_results"
+DEFAULT_OUT_DIR = "/home/namit/iitgn/underactuated_finger/high_fidelity/validation_results"
 
 _FLOAT_PRECISION = 6
 

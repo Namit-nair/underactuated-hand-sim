@@ -35,7 +35,7 @@ ratios, or joint stops.
 ## Repository layout
 
 ```text
-mujoco_simulations/
+underactuated_finger/
 ├── config.py                 # SINGLE SOURCE OF TRUTH for all parameters
 ├── analytical_model.py       # Closed-form morphology law (energy minimisation)
 ├── finger_model.py           # Turns the soft viewer XML into a physics-faithful model

@@ -24,7 +24,7 @@ hardware/
 │                     per-link deviation readouts to straighten links before a test.
 │                     Auto-finds the RealSense on ANY usb port (list_devices()).
 ├── servo.py          Dynamixel XM430-W350-T/R wrapper. ΔL↔servo via a 25 mm-Ø
-│                     spool (r=12.5 mm). Safety: current limit 1193u≈3.21 A,
+│                     spool (r=11.175 mm, Ø22.35 mm measured). Safety: current limit 1193u≈3.21 A,
 │                     soft ΔL cap 25 mm, e-stop, runtime pull-direction calib.
 │                     Auto-detects port/baud/id across ttyUSB*/ttyACM*
 │                     (autodetect_servo); Servo + MockServo.
@@ -58,15 +58,15 @@ Use **only** `opencv-contrib-python` (it has `cv2.aruco`) — never also
 `opencv-python`. The old `dynamixel-control/venv` is now redundant.
 
 `config.py` / `analytical_model.py` are found automatically (the modules add
-`mujoco_simulations/` to `sys.path`). If you launch from elsewhere, set
-`PYTHONPATH=/home/namit/iitgn/mujoco_simulations`.
+`underactuated_finger/` to `sys.path`). If you launch from elsewhere, set
+`PYTHONPATH=/home/namit/iitgn/underactuated_finger`.
 
 ---
 
 ## Run
 
 ```bash
-cd mujoco_simulations/hardware
+cd underactuated_finger/hardware
 PY=/home/namit/iitgn/mujoco_env/bin/python3
 $PY dashboard.py                       # real RealSense + real Dynamixel
 $PY dashboard.py --mock                # no hardware (synthetic cam + servo)
@@ -157,7 +157,7 @@ markers_all_visible, settle_time_s, trial_idx
 
 | What | Default | Where |
 |------|---------|-------|
-| Spool radius | 12.5 mm (25 mm Ø) | `--spool-radius`, config note |
+| Spool radius | 11.175 mm (Ø22.35 mm measured) | `--spool-radius`, config note |
 | Soft ΔL cap | 25 mm | `servo.Servo(soft_delta_l_cap_mm=…)` |
 | Current limit | 1193 u ≈ 3.21 A (XM430 max) | `servo.Servo(current_limit_units=…)` |
 | Settle: |θ̇|<2 °/s, hold 0.5 s, timeout 8 s | `SettleDetector(...)` |

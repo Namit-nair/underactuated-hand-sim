@@ -1,6 +1,6 @@
 # Hardware-validation rig (single tendon-driven finger).
 # Install into ONE environment that can also see the repo's config.py /
-# analytical_model.py (run from the mujoco_simulations/ folder, or add it to
+# analytical_model.py (run from the underactuated_finger/ folder, or add it to
 # PYTHONPATH). mujoco is needed only to extract the moment arms from the
 # high-fidelity model (same source of truth as validation.py); without it the
 # dashboard falls back to the constant config.SHEATH_MOMENT_ARM.
