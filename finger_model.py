@@ -36,6 +36,7 @@ _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 import config  # noqa: E402  — single source of truth
+from analytical_model import moment_arm_at_angle  # noqa: E402
 
 # =====================================================================
 # Defaults — pulled from config.py; override per-call via
@@ -129,3 +130,33 @@ def load_fidelity_model(base_xml_path, *, disable_gravity=True,
     if disable_contact:
         model.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
     return model
+
+
+def update_fixed_tendon_moment_arms(model, data, r0=None):
+    """Make MuJoCo's effective tendon moment arm angle-dependent.
+
+    A MuJoCo ``<fixed>`` tendon has CONSTANT joint coefficients, so to follow the
+    measured angle-dependent moment-arm curve (``config.MOMENT_ARM_CURVE_*`` — the
+    same table the analytical model uses) we rewrite those coefficients in place,
+    once per simulation step, from the CURRENT joint angles:
+
+        coef_i = -moment_arm_at_angle(theta_i, r0)
+
+    (negative = flexor: positive flexion shortens the tendon). Call this right
+    before ``mujoco.mj_step`` in every stepped loop. No-op when
+    ``config.MOMENT_ARM_ANGLE_DEPENDENT`` is False (the constant 0-deg arm baked
+    into the XML is preserved). Only JOINT wraps are touched, so a spatial tendon
+    (site/pulley wraps), if any, is left alone.
+    """
+    if not getattr(config, "MOMENT_ARM_ANGLE_DEPENDENT", False):
+        return
+    if r0 is None:
+        r0 = config.SHEATH_MOMENT_ARM
+    for t in range(model.ntendon):
+        adr = model.tendon_adr[t]
+        for w in range(adr, adr + model.tendon_num[t]):
+            if model.wrap_type[w] != mujoco.mjtWrap.mjWRAP_JOINT:
+                continue
+            jid = int(model.wrap_objid[w])
+            theta = float(data.qpos[model.jnt_qposadr[jid]])
+            model.wrap_prm[w] = -float(moment_arm_at_angle(theta, r0))
