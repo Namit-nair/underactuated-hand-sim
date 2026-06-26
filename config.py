@@ -272,7 +272,27 @@ GRIPPER_BLOCK_FRONT_X = -(MCP_CENTER[0] + BASE_LINK_LENGTH_MM) / 1000.0   # m
 #    extraction force T to measure grip retention for a given stiffness
 #    ratio.
 # =====================================================================
-LOAD_TEST_SLIDE_RANGE = (-0.01, 0.15)   # m — object slide joint limits along X
+# ---- Hardware-matched load-test conditions (mimic the as-built rig) ---------
+LOAD_TEST_OBJECT_DIAMETER_MM = 84.0     # Ø of the grasped (duct-tape-wrapped) object
+LOAD_TEST_OBJECT_HEIGHT_MM = 80.0       # vertical-cylinder height (axis +Z, "rotated")
+LOAD_TEST_MOUNT_HEIGHT = 0.060          # m — finger-base/object-centre height (clears the floor)
+LOAD_TEST_APERTURE_INNER_MM = 77.0      # gap between the inner faces of the two base links
+LOAD_TEST_CLOSE_DELTA_L_MM = 15.0       # tendon pull ΔL after tensioning, before pull-out
+LOAD_TEST_INIT_SPLAY_DEG = -20.0        # initial MCP extension so the straight fingers start
+                                        #   OPEN around the Ø80 object (which is wider than the
+                                        #   77 mm aperture) instead of pre-embedded; within the
+                                        #   -30 limit. The fingers then close from open (no
+                                        #   initial near-rigid penetration / blow-up).
+LOAD_TEST_BACKSTOP_MM = 18.0            # closest the object's near face can be pushed to the block
+LOAD_TEST_OBJECT_START_GAP_MM = 30.0    # object near face starts this far OUT from the backstop
+# Centre-to-centre finger separation so the inner base-link faces are 77 mm apart
+# (inner face = separation/2 - BASE_LINK_WIDTH/2).
+LOAD_TEST_SEPARATION = (LOAD_TEST_APERTURE_INNER_MM + BASE_LINK_WIDTH_MM) / 1000.0   # m
+
+# Object slide joint: anchor the body at the START position (qpos=0); the object can
+# be pushed back by LOAD_TEST_OBJECT_START_GAP_MM to the backstop (qpos negative) and
+# pulled out in +X (qpos positive). The lower limit IS the 18 mm backstop.
+LOAD_TEST_SLIDE_RANGE = (-LOAD_TEST_OBJECT_START_GAP_MM / 1000.0, 0.12)   # m
 LOAD_TEST_SLIDE_DAMPING = 0.5           # N·s/m — light viscous drag on the slide
 LOAD_TEST_OBJECT_MASS_KG = 0.050        # kg — object mass (50 g default)
 LOAD_TEST_MAX_TENSION = 300.0           # N — pull-force ceiling (T slider + motor ctrlrange).
@@ -287,7 +307,13 @@ LOAD_TEST_MAX_TENSION = 300.0           # N — pull-force ceiling (T slider + m
 # mm) resists by friction alone and slips almost immediately. The object must
 # still FIT the aperture: aperture/2 - 0.013 >= radius, else the fingers start
 # embedded in it and contact forces explode.
-LOAD_TEST_OBJECT_DEPTH_X = 0.050        # m — default: an enveloping grasp that holds
+# Object-centre X anchor (= start position): backstop + start gap + object radius,
+# measured from the block front face (GRIPPER_BLOCK_FRONT_X). With the defaults this
+# is (18 + 30 + 40) = 88 mm. Defines where the fingers wrap; tune the block/object if
+# a different grasp depth is wanted.
+LOAD_TEST_OBJECT_DEPTH_X = GRIPPER_BLOCK_FRONT_X + (
+    LOAD_TEST_BACKSTOP_MM + LOAD_TEST_OBJECT_START_GAP_MM
+    + LOAD_TEST_OBJECT_DIAMETER_MM / 2.0) / 1000.0        # m (~0.088)
 
 # ---- Actuator force limit (the "infinite grip" fix) -------------------------
 # A ΔL-displacement tendon is a near-rigid spring (TENDON_STIFFNESS ≈ 1e5 N/m),
@@ -388,6 +414,16 @@ LOAD_TEST_STIFFNESS_CONFIGS = {
 }
 # Selection shown on dashboard startup (must be a key of the dict above).
 LOAD_TEST_STIFFNESS_DEFAULT = "Uniform — medium (S2·S2·S2)"
+
+# The 3 stiffness combinations run by the simulated load test
+# (gripper/stiffness_sweep.py --combos), mirroring the hardware trials: a uniform
+# baseline plus the proximal-stiff and distal-stiff graded sets. Each entry is a key
+# of LOAD_TEST_STIFFNESS_CONFIGS above.
+LOAD_TEST_STIFFNESS_COMBOS = (
+    "Uniform — medium (S2·S2·S2)",
+    "Graded stiff→soft (S1·S2·S3)",   # proximal-stiff (MCP stiffest)
+    "Graded soft→stiff (S3·S2·S1)",   # distal-stiff (DIP stiffest)
+)
 
 # -- Release detection ------------------------------------------------
 RELEASE_DROP_FRAC = 0.30                # force drop from the running peak that flags release
