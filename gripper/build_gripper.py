@@ -41,6 +41,7 @@ _REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 import config  # noqa: E402  — single source of truth
+import finger_model  # noqa: E402  — fixed-tendon moment-arm tracking
 
 MM = 1e-3
 _PARAMS_PATH = os.path.join(_REPO_ROOT, "high_fidelity", "params.json")
@@ -120,9 +121,19 @@ def _finger_body_xml(prefix, base_pos, base_quat, P):
     rg = (config.MCP_RANGE, config.PIP_RANGE, config.DIP_RANGE)
     j = [f"{prefix}_{n}" for n in JOINT_NAMES]
 
+    # Base link (intermediary bar from the MCP joint to the central block): a 20 mm
+    # link starting AT the MCP hole centre and running out along the root side
+    # (local +X >= MCP_CENTER[0]) to the base of the block. 20 mm long, 20 mm wide,
+    # 15 mm deep. NON-COLLIDING (contype/conaffinity/density/mass=0) — purely visual.
+    bl_hx = config.BASE_LINK_LENGTH_MM / 2 * MM
+    bl_hy = config.BASE_LINK_WIDTH_MM / 2 * MM
+    bl_hz = config.BASE_LINK_HEIGHT_MM / 2 * MM
+    bl_cx = (config.MCP_CENTER[0] + config.BASE_LINK_INNER_GAP_MM
+             + config.BASE_LINK_LENGTH_MM / 2) * MM
+
     return f'''
     <body name="{prefix}_base" pos="{_v3(base_pos)}" quat="{_q4(base_quat)}">
-      <geom type="box" size="0.01875 0.0125 0.0135" pos="0.03125 0 0"
+      <geom type="box" size="{bl_hx:.6f} {bl_hy:.6f} {bl_hz:.6f}" pos="{bl_cx:.6f} 0 0"
             rgba="0.30 0.30 0.33 1" contype="0" conaffinity="0" density="0" mass="0"/>
 
       <body name="{prefix}_proximal" pos="{_v3(pos_prox)}">
@@ -214,6 +225,16 @@ def generate_gripper_xml(out_path=XML_PATH, *,
     s_m = object_size_mm * MM
     L_m = object_length_mm * MM
 
+    # Central mounting block both fingers sit on (NON-COLLIDING, cosmetic). In this
+    # vertical display scene the finger root direction is world -Z (Ry(90°) maps local
+    # +X -> world -Z), so the block hangs a base-link-length BELOW the bases — its top
+    # face at the base of the link — and never overlaps the MCP joints.
+    bhx = config.GRIPPER_BLOCK_SIZE_MM[0] / 2 * MM
+    bhy = config.GRIPPER_BLOCK_SIZE_MM[1] / 2 * MM
+    bhz = config.GRIPPER_BLOCK_SIZE_MM[2] / 2 * MM
+    block_back_m = (config.MCP_CENTER[0] + config.BASE_LINK_LENGTH_MM) / 1000.0
+    block_z = mount_height - block_back_m - bhz
+
     def _a(shape):
         return 1.0 if (object_enabled and object_shape == shape) else 0.0
 
@@ -270,12 +291,19 @@ def generate_gripper_xml(out_path=XML_PATH, *,
          slid live by interactive_gripper.py: low = enveloping, high = pinch.
          The cylinder lies along X so the fingers wrap its circular section. -->
     <body name="object" pos="0 0 {object_depth_z}">
-      <geom name="obj_box" type="box" size="{s_m} {s_m} {L_m}"
+      <geom name="obj_box" type="box" size="{s_m} {s_m} {L_m}" friction="{config.GRIPPER_OBJECT_FRICTION}"
             rgba="0.85 0.55 0.20 {_a('box')}" contype="{_c('box')}" conaffinity="{_c('box')}"/>
-      <geom name="obj_cyl" type="cylinder" size="{s_m} {L_m}" quat="0.707107 0 0.707107 0"
+      <geom name="obj_cyl" type="cylinder" size="{s_m} {L_m}" quat="0.707107 0 0.707107 0" friction="{config.GRIPPER_OBJECT_FRICTION}"
             rgba="0.85 0.55 0.20 {_a('cylinder')}" contype="{_c('cylinder')}" conaffinity="{_c('cylinder')}"/>
-      <geom name="obj_sph" type="sphere" size="{s_m}"
+      <geom name="obj_sph" type="sphere" size="{s_m}" friction="{config.GRIPPER_OBJECT_FRICTION}"
             rgba="0.85 0.55 0.20 {_a('sphere')}" contype="{_c('sphere')}" conaffinity="{_c('sphere')}"/>
+    </body>
+
+    <!-- Central mount the two fingers sit on (cosmetic; non-colliding). Hangs a
+         base-link-length below the bases so it clears the MCP joints. -->
+    <body name="mount_block" pos="0 0 {block_z:.6f}">
+      <geom type="box" size="{bhx:.6f} {bhy:.6f} {bhz:.6f}" rgba="0.25 0.25 0.28 1"
+            contype="0" conaffinity="0" density="0" mass="0"/>
     </body>
   </worldbody>
 
@@ -349,6 +377,7 @@ def _selftest():
         for f in "ab":
             ls = Lrest[f] - cur
             model.tendon_lengthspring[tid[f]] = [ls, ls]
+        finger_model.update_fixed_tendon_moment_arms(model, data)
         mujoco.mj_step(model, data)
         peak_pen = min(peak_pen, obj_pen())
 

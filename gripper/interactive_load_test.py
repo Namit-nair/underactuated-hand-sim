@@ -82,6 +82,7 @@ for p in (HERE, _REPO_ROOT):
         sys.path.insert(0, p)
 
 import config                  # noqa: E402  — single source of truth
+import finger_model            # noqa: E402  — fixed-tendon moment-arm tracking
 
 MM = 1e-3
 _PARAMS_PATH = os.path.join(_REPO_ROOT, "high_fidelity", "params.json")
@@ -169,9 +170,19 @@ def _finger_body_xml(prefix, base_pos, base_quat, P):
     rg = (config.MCP_RANGE, config.PIP_RANGE, config.DIP_RANGE)
     j = [f"{prefix}_{n}" for n in JOINT_NAMES]
 
+    # Base link (intermediary bar from the MCP joint to the central block): a 20 mm
+    # link starting AT the MCP hole centre and running out along the root side
+    # (local +X >= MCP_CENTER[0]) to the base of the block. 20 mm long, 20 mm wide,
+    # 15 mm deep. NON-COLLIDING (contype/conaffinity/density/mass=0) — purely visual.
+    bl_hx = config.BASE_LINK_LENGTH_MM / 2 * MM
+    bl_hy = config.BASE_LINK_WIDTH_MM / 2 * MM
+    bl_hz = config.BASE_LINK_HEIGHT_MM / 2 * MM
+    bl_cx = (config.MCP_CENTER[0] + config.BASE_LINK_INNER_GAP_MM
+             + config.BASE_LINK_LENGTH_MM / 2) * MM
+
     return f'''
     <body name="{prefix}_base" pos="{_v3(base_pos)}" quat="{_q4(base_quat)}">
-      <geom type="box" size="0.01875 0.0125 0.0135" pos="0.03125 0 0"
+      <geom type="box" size="{bl_hx:.6f} {bl_hy:.6f} {bl_hz:.6f}" pos="{bl_cx:.6f} 0 0"
             rgba="0.30 0.30 0.33 1" contype="0" conaffinity="0" density="0" mass="0"/>
 
       <body name="{prefix}_proximal" pos="{_v3(pos_prox)}">
@@ -220,11 +231,13 @@ def generate_load_test_xml(out_path=XML_PATH, *, separation=None,
     extraction force (tension). All three primitive geoms (box / cylinder /
     sphere) are present; only the selected shape is visible + collidable.
     """
-    separation = config.GRIPPER_SEPARATION if separation is None else separation
-    mount_height = config.GRIPPER_MOUNT_HEIGHT if mount_height is None else mount_height
+    # Hardware-matched defaults (see config: LOAD_TEST_*). Object defaults are the
+    # Ø80 vertical cylinder used on the bench; sizes are passed as radius / half-height.
+    separation = config.LOAD_TEST_SEPARATION if separation is None else separation
+    mount_height = config.LOAD_TEST_MOUNT_HEIGHT if mount_height is None else mount_height
     object_shape = config.GRIPPER_OBJECT_SHAPE if object_shape is None else object_shape
-    object_size_mm = config.GRIPPER_OBJECT_SIZE_MM if object_size_mm is None else object_size_mm
-    object_length_mm = config.GRIPPER_OBJECT_LENGTH_MM if object_length_mm is None else object_length_mm
+    object_size_mm = config.LOAD_TEST_OBJECT_DIAMETER_MM / 2.0 if object_size_mm is None else object_size_mm
+    object_length_mm = config.LOAD_TEST_OBJECT_HEIGHT_MM / 2.0 if object_length_mm is None else object_length_mm
     # Load-test-specific depth (an enveloping grasp by default; see config).
     object_depth_x = config.LOAD_TEST_OBJECT_DEPTH_X if object_depth_x is None else object_depth_x
     grav = "0 0 -9.81" if gravity_on else "0 0 0"
@@ -259,6 +272,13 @@ def generate_load_test_xml(out_path=XML_PATH, *, separation=None,
     s_m = object_size_mm * MM
     L_m = object_length_mm * MM
     obj_mass = config.LOAD_TEST_OBJECT_MASS_KG
+
+    # Central mount the two fingers sit on (NON-COLLIDING, cosmetic). Its +X
+    # (front) face is at GRIPPER_BLOCK_FRONT_X and it extends in -X, centred at
+    # Y=0, at the finger mount height.
+    bhx = config.GRIPPER_BLOCK_SIZE_MM[0] / 2 * MM
+    bhy = config.GRIPPER_BLOCK_SIZE_MM[1] / 2 * MM
+    bhz = config.GRIPPER_BLOCK_SIZE_MM[2] / 2 * MM
 
     def _a(shape):
         """Alpha (visibility): 1.0 for the active shape, 0 otherwise."""
@@ -320,13 +340,20 @@ def generate_load_test_xml(out_path=XML_PATH, *, separation=None,
     <body name="object" pos="{object_depth_x} 0 {mount_height}">
       <joint type="slide" name="object_slide" axis="1 0 0"
              range="{slide_lo} {slide_hi}" damping="{slide_damp}" limited="true"/>
-      <geom name="obj_box" type="box" size="{s_m} {s_m} {L_m}" mass="{obj_mass}"
+      <geom name="obj_box" type="box" size="{s_m} {s_m} {L_m}" mass="{obj_mass}" friction="{config.GRIPPER_OBJECT_FRICTION}"
             rgba="0.85 0.55 0.20 {_a('box')}" contype="{_c('box')}" conaffinity="{_c('box')}"/>
       <geom name="obj_cyl" type="cylinder" size="{s_m} {L_m}" quat="0.707107 0 0.707107 0"
-            mass="{obj_mass}"
+            mass="{obj_mass}" friction="{config.GRIPPER_OBJECT_FRICTION}"
             rgba="0.85 0.55 0.20 {_a('cylinder')}" contype="{_c('cylinder')}" conaffinity="{_c('cylinder')}"/>
-      <geom name="obj_sph" type="sphere" size="{s_m}" mass="{obj_mass}"
+      <geom name="obj_sph" type="sphere" size="{s_m}" mass="{obj_mass}" friction="{config.GRIPPER_OBJECT_FRICTION}"
             rgba="0.85 0.55 0.20 {_a('sphere')}" contype="{_c('sphere')}" conaffinity="{_c('sphere')}"/>
+    </body>
+
+    <!-- Central mount the two fingers sit on (cosmetic; non-colliding). Front
+         (+X) face at GRIPPER_BLOCK_FRONT_X, extending in -X. -->
+    <body name="mount_block" pos="{config.GRIPPER_BLOCK_FRONT_X - bhx:.6f} 0 {mount_height:.6f}">
+      <geom type="box" size="{bhx:.6f} {bhy:.6f} {bhz:.6f}" rgba="0.25 0.25 0.28 1"
+            contype="0" conaffinity="0" density="0" mass="0"/>
     </body>
   </worldbody>
 
@@ -411,12 +438,12 @@ class GripperState:
         self.link = True
         self.dL = {"a": 0.0, "b": 0.0}                  # m (tendon pull)
         self.stiffness = dict(STIFF_DEFAULT)            # N·m/rad, shared by both fingers
-        self.aperture = config.GRIPPER_SEPARATION       # m
+        self.aperture = config.LOAD_TEST_SEPARATION       # m
         self.obj_enabled = config.GRIPPER_OBJECT_ENABLED
-        self.obj_shape = config.GRIPPER_OBJECT_SHAPE
-        self.obj_rotated = False
-        self.obj_size_mm = config.GRIPPER_OBJECT_SIZE_MM
-        self.obj_len_mm = config.GRIPPER_OBJECT_LENGTH_MM
+        self.obj_shape = "cylinder"
+        self.obj_rotated = True                          # vertical cylinder (axis +Z), like the hardware object
+        self.obj_size_mm = config.LOAD_TEST_OBJECT_DIAMETER_MM / 2.0  # radius
+        self.obj_len_mm = config.LOAD_TEST_OBJECT_HEIGHT_MM / 2.0     # half-height
         self.obj_depth_x = config.LOAD_TEST_OBJECT_DEPTH_X  # m — build-time X anchor
         self.gravity = True                              # load test runs with gravity
         self.tension = 0.0                               # N — applied pull force T
@@ -474,6 +501,12 @@ def _apply(model, data, ids, cur, snap):
         mujoco.mj_resetData(model, data)
         cur["a"] = cur["b"] = 0.0
         did_reset = True
+        # Pre-open both fingers' MCP to the config splay so the straight fingers
+        # don't start embedded in the Ø80 object; the caller's mj_forward then
+        # sees open fingers and the first forward has no penetration.
+        import math as _math
+        for f in "ab":
+            data.qpos[ids.qadr[f]["mcp"]] = _math.radians(config.LOAD_TEST_INIT_SPLAY_DEG)
 
     # gravity
     model.opt.gravity[:] = (0, 0, -9.81) if snap.gravity else (0, 0, 0)
@@ -520,6 +553,9 @@ def _apply(model, data, ids, cur, snap):
     for f in "ab":
         for n in JOINT_NAMES:
             model.jnt_stiffness[ids.jnt[f][n]] = snap.stiffness[n]
+
+    # keep the fixed-tendon moment arm tracking the joint angles each step
+    finger_model.update_fixed_tendon_moment_arms(model, data)
 
     # per-finger tendon pull ΔL (low-passed), driven exactly like validation.py:
     #   springlength = L_rest - ΔL  ->  the stiff string pulls the joints flexed.
@@ -725,7 +761,7 @@ def build_ui(state):
     aper_f = ctk.CTkFrame(root)
     aper_f.pack(fill="x", **pad)
     ctk.CTkLabel(aper_f, text="Aperture (mm)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(5, 0))
-    aper_var = _slider_entry(aper_f, "Gap", APER_MIN_MM, APER_MAX_MM, config.GRIPPER_SEPARATION * 1000, 1.0, lambda v: set_state(aperture=v / 1000.0))
+    aper_var = _slider_entry(aper_f, "Gap", APER_MIN_MM, APER_MAX_MM, config.LOAD_TEST_SEPARATION * 1000, 1.0, lambda v: set_state(aperture=v / 1000.0))
 
     # ---- Probe object --------------------------------------------------
     obj_f = ctk.CTkFrame(root)
@@ -745,8 +781,8 @@ def build_ui(state):
     rot_var = tk.BooleanVar(value=state.obj_rotated)
     ctk.CTkCheckBox(top, text="Rotate 90° (Y)", variable=rot_var, command=lambda: set_state(obj_rotated=rot_var.get())).pack(side="left", padx=10)
 
-    _slider_entry(obj_f, "Size r", SIZE_MIN_MM, SIZE_MAX_MM, config.GRIPPER_OBJECT_SIZE_MM, 0.5, lambda v: set_state(obj_size_mm=v))
-    _slider_entry(obj_f, "Length", LEN_MIN_MM, LEN_MAX_MM, config.GRIPPER_OBJECT_LENGTH_MM, 0.5, lambda v: set_state(obj_len_mm=v))
+    _slider_entry(obj_f, "Size r", SIZE_MIN_MM, SIZE_MAX_MM, config.LOAD_TEST_OBJECT_DIAMETER_MM / 2.0, 0.5, lambda v: set_state(obj_size_mm=v))
+    _slider_entry(obj_f, "Length", LEN_MIN_MM, LEN_MAX_MM, config.LOAD_TEST_OBJECT_HEIGHT_MM / 2.0, 0.5, lambda v: set_state(obj_len_mm=v))
 
     # ---- External load -------------------------------------------------
     load_f = ctk.CTkFrame(root)
@@ -954,6 +990,13 @@ def selftest():
     ids.Lrest = {f: float(data.ten_length[ids.tendon[f]]) for f in "ab"}
     cur = {"a": 0.0, "b": 0.0}
 
+    # selftest does not route reset through _apply, so apply the splay init by
+    # hand: pre-open both fingers' MCP to the config splay and re-forward so the
+    # straight fingers don't start embedded in the Ø80 object.
+    for f in "ab":
+        data.qpos[ids.qadr[f]["mcp"]] = math.radians(config.LOAD_TEST_INIT_SPLAY_DEG)
+    mujoco.mj_forward(model, data)
+
     F_max = config.LOAD_TEST_MAX_TENDON_FORCE
     print(f"  nq={model.nq} nbody={model.nbody} ngeom={model.ngeom} "
           f"ntendon={model.ntendon}   F_max={F_max:.0f} N per finger")
@@ -961,19 +1004,21 @@ def selftest():
     def snap_at(dL, tension):
         return SimpleNamespace(
             reset=False, link=False, dL={"a": dL, "b": dL},
-            stiffness=dict(STIFF_DEFAULT), aperture=config.GRIPPER_SEPARATION,
+            stiffness=dict(STIFF_DEFAULT), aperture=config.LOAD_TEST_SEPARATION,
             obj_enabled=True, obj_shape=config.GRIPPER_OBJECT_SHAPE,
-            obj_rotated=False, obj_size_mm=config.GRIPPER_OBJECT_SIZE_MM,
-            obj_len_mm=config.GRIPPER_OBJECT_LENGTH_MM,
+            obj_rotated=True,
+            obj_size_mm=config.LOAD_TEST_OBJECT_DIAMETER_MM / 2.0,
+            obj_len_mm=config.LOAD_TEST_OBJECT_HEIGHT_MM / 2.0,
             obj_depth_x=config.LOAD_TEST_OBJECT_DEPTH_X, gravity=True,
             tension=tension, max_force=F_max)
 
-    # Phase 1: close on the object (ΔL = 14 mm), capped flexor.
+    # Phase 1: close on the object (hardware close ΔL), capped flexor.
+    close_dL = config.LOAD_TEST_CLOSE_DELTA_L_MM / 1000.0
     for _ in range(int(2.0 / model.opt.timestep)):
-        _apply(model, data, ids, cur, snap_at(0.014, 0.0))
+        _apply(model, data, ids, cur, snap_at(close_dL, 0.0))
         mujoco.mj_step(model, data)
     assert np.all(np.isfinite(data.qpos)), "sim blew up during close"
-    ro = _readout(model, data, ids, snap_at(0.014, 0.0))
+    ro = _readout(model, data, ids, snap_at(close_dL, 0.0))
     print(f"  closed: A T={ro['a_T']:.1f}N  B T={ro['b_T']:.1f}N  "
           f"grip={ro['grip']:.2f}N  ncon={ro['ncon']}  saturated={ro['sat']}")
 
@@ -982,7 +1027,7 @@ def selftest():
     T = 0.0
     while T <= config.LOAD_TEST_MAX_TENSION:
         for _ in range(int(0.25 / model.opt.timestep)):
-            _apply(model, data, ids, cur, snap_at(0.014, T))
+            _apply(model, data, ids, cur, snap_at(close_dL, T))
             mujoco.mj_step(model, data)
         if float(data.qpos[ids.obj_qadr]) > 0.020:
             breakaway_T = T
