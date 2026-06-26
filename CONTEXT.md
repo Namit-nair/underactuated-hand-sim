@@ -1,12 +1,13 @@
 # Session Context
 
-**Current Task:** No active task — ready for next assignment.
+**Current Task:** Committed 10 chunks from today's work; ready for next assignment.
 
 **Key Decisions:**
-- All code committed and pushed; no uncommitted work in progress.
-- Stiffness spring-set selector and START PULL logging fix are complete.
+- Joint ranges widened to -30..90° to allow object splay without clipping.
+- Hardware-faithful gripper geometry (base link + central block + per-surface friction).
+- Angle-dependent moment arm tracking integrated into MuJoCo step loop.
 
 **Next Steps:**
-- Continue hardware validation sweep analysis with new datasets.
-- Verify load-test spring sets match the real test matrix.
-- Update documentation as new features or rig changes land.
+- Push 10 new commits to origin.
+- Run stiffness sweep with updated load-test params to verify consistency.
+- Validate capstan module against hardware load-test data.
