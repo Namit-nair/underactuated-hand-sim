@@ -173,7 +173,9 @@ GRIPPER_APERTURE_MAX_MM = 95.0       # mm — hardware maximum aperture (fully-o
 # NOTE: the open finger half-thickness is ~13 mm, so the object must FIT the gap:
 # aperture/2 - 0.013 >= object radius, else the fingers start embedded in the
 # object at rest and contact forces explode. Keep the aperture wide enough.
-GRIPPER_MOUNT_HEIGHT = 0.040          # m — finger base height above the floor
+GRIPPER_MOUNT_HEIGHT = 0.065          # m — finger base height above the floor (lifted so the
+                                      #   central block, which now sits a base-link-length below
+                                      #   the fingers, rests on the floor instead of clipping it)
 GRIPPER_GRAVITY_DEFAULT = False       # match the tested (gravity-free) fidelity model
 
 # Finger drive: each flexor is driven by ΔL — we shorten the tendon spring's rest
@@ -231,7 +233,36 @@ GRIPPER_OBJECT_LENGTH_MM = 40.0       # cylinder half-length (along X) / box hal
 GRIPPER_OBJECT_SIZE_RANGE_MM = (4.0, 80.0)     # UI size bounds (radius up to 80 mm)
 GRIPPER_OBJECT_LENGTH_RANGE_MM = (4.0, 120.0)  # UI length bounds
 GRIPPER_OBJECT_DEPTH_RANGE = (0.01, 0.15)      # m — UI depth bounds
-GRIPPER_OBJECT_DEPTH_Z = 0.075        # m — default object depth between the fingers
+GRIPPER_OBJECT_DEPTH_Z = 0.100        # m — default object depth between the fingers
+                                      #   (kept 35 mm above the lifted base; see MOUNT_HEIGHT)
+
+# ---- Base link + central mounting block (hardware-faithful geometry) --------
+# Each finger connects to the central mounting block through an intermediary "base
+# link" — the bar between the block and the MCP joint. On the as-built rig this link
+# runs from the MCP joint-hole centre out to the base of the block: 20 mm long, 20 mm
+# wide, 15 mm deep. It is drawn as a NON-COLLIDING visual box (contype=0). The
+# kinematic MCP offset (MCP_CENTER) is unchanged — geometry/visual only, no joint-
+# mechanics change.
+# Local frame: the finger extends along local -X (MCP -> tip), so the root/block side
+# is local +X (>= MCP_CENTER[0] = 12.5 mm). The base link spans
+#   [MCP_x + INNER_GAP,  MCP_x + INNER_GAP + LENGTH]  along local +X — i.e. from the
+# MCP hole centre (INNER_GAP = 0) out to MCP_x + LENGTH, where the block begins.
+BASE_LINK_LENGTH_MM = 20.0            # local X: MCP hole centre -> base of the block
+BASE_LINK_WIDTH_MM = 20.0            # Y (cross-finger) — inner faces set the aperture
+BASE_LINK_HEIGHT_MM = 15.0           # Z — the link's "depth" / thickness
+BASE_LINK_INNER_GAP_MM = 0.0         # link starts AT the MCP hole centre, so the 20 mm is
+                                     #   measured from the hole centre to the base of the block
+
+# Central mounting block: both finger bases mount on it. Its front (object-facing)
+# face sits at the BASE of the base link — i.e. BEHIND the MCP joints, NOT overlapping
+# them (the block used to be centred on the bases and swallowed the joints). It is the
+# reference plane the object's pushed-back distance is measured from. Drawn
+# non-colliding (the object backstop is enforced by the slide-joint limit).
+GRIPPER_BLOCK_SIZE_MM = (30.0, 120.0, 30.0)   # full X, Y, Z
+# World X of the block's front (+X, object-facing) face: at the base of the link,
+# one link-length behind the MCP hole, so it clears the joints. (Load-test scene;
+# the static gripper places its block along -Z by the same offset.)
+GRIPPER_BLOCK_FRONT_X = -(MCP_CENTER[0] + BASE_LINK_LENGTH_MM) / 1000.0   # m
 
 # =====================================================================
 # 8. LOAD TEST — horizontal gripper pull-out test
