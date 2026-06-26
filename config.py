@@ -64,9 +64,10 @@ DIP_ANCHOR_FRAC = 0.80
 #    written into finger.xml AND consumed by the analytical model and the
 #    validation stick-figure clipping (so the three can never drift apart).
 # =====================================================================
-MCP_RANGE = (-5, 90)    # degrees
-PIP_RANGE = (0, 90)     # hardware PIP mechanically locks out at ~90° (was 110)
-DIP_RANGE = (0, 90)
+MCP_RANGE = (-30, 90)   # degrees — -30 lower limit lets a large grasped object splay
+PIP_RANGE = (-30, 90)   # the fingers open without clipping the stop (the tendon just
+DIP_RANGE = (-30, 90)   # redistributes the curl); pure-flexion studies never go
+                        # negative, so they are unaffected by the lower bound.
 
 # Per-joint passive stiffness written into finger.xml [N·m/rad].
 # (The validation suite overrides these per-cell to sweep stiffness ratios.)
