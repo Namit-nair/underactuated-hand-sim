@@ -73,6 +73,22 @@ JCOLORS = {"mcp": "#58a6ff", "pip": "#7ee787", "dip": "#ff7b72"}
 DELTA_PRESETS = (0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0)  # mm, in the order they appear on the UI
 TICK_MS = 50  # 20 Hz main loop
 
+# Spring sets are built ONLY from the springs installed in config.py
+# (SPRING_1/2/3 = large/medium/small) — no arbitrary stiffness values. Selecting
+# a preset fills and LOCKS k_mcp/k_pip/k_dip to those config values; the single
+# "custom" entry unlocks the fields for trying something out of the ordinary.
+# "uniform_*" gives one set per installed spring; the dominant sets soften the
+# named joint (smallest k) so it bends the most. (k_vec order: mcp, pip, dip.)
+_SPRING_L, _SPRING_M, _SPRING_S = config.SPRING_1, config.SPRING_2, config.SPRING_3
+SPRING_PRESETS = {
+    "custom":            None,
+    "uniform_large":     (_SPRING_L, _SPRING_L, _SPRING_L),
+    "uniform_medium":    (_SPRING_M, _SPRING_M, _SPRING_M),
+    "uniform_small":     (_SPRING_S, _SPRING_S, _SPRING_S),
+    "proximal_dominant": (_SPRING_S, _SPRING_M, _SPRING_M),
+    "distal_dominant":   (_SPRING_M, _SPRING_M, _SPRING_S),
+}
+
 # Set-Zero / Capture averaging: the ArUco in-plane angles jitter a few degrees
 # frame-to-frame, so we never trust a single frame. Both zeroing and capturing
 # grab N_AVG_SAMPLES successive detections and take a wrap-safe circular mean
@@ -335,13 +351,14 @@ class Dashboard(QMainWindow):
         return g
 
     def _spring_group(self):
-        g = _group("INSTALLED SPRINGS  (custom k, N·m/rad)", "#d2a8ff")
+        g = _group("INSTALLED SPRINGS  (config springs only, N·m/rad)", "#d2a8ff")
         grid = QGridLayout()
-        grid.addWidget(QLabel("label"), 0, 0)
+        grid.addWidget(QLabel("spring set"), 0, 0)
         self.lbl_label = QComboBox()
+        # Editable so a "custom" run can still be given a descriptive label; the
+        # preset NAME (when it matches one) drives + locks the k fields.
         self.lbl_label.setEditable(True)
-        self.lbl_label.addItems(["custom", "uniform", "proximal_dominant",
-                                 "distal_dominant"])
+        self.lbl_label.addItems(list(SPRING_PRESETS.keys()))
         self.lbl_label.setStyleSheet("QComboBox{background:#0d1117;color:#c9d1d9;"
                                      "border:1px solid #30363d;padding:2px;}")
         grid.addWidget(self.lbl_label, 0, 1, 1, 3)
@@ -361,6 +378,13 @@ class Dashboard(QMainWindow):
         self.lbl_rho.setStyleSheet("color:#d2a8ff;")
         grid.addWidget(self.lbl_rho, 3, 0, 1, 4)
         g.setLayout(grid)
+
+        # A preset selection fills + locks the k fields to config springs; only
+        # "custom" leaves them editable. Default to uniform_medium (the previous
+        # default k = SPRING_2). Connect first, then select so the lock applies.
+        self.lbl_label.currentTextChanged.connect(self._apply_spring_preset)
+        self.lbl_label.setCurrentText("uniform_medium")
+        self._apply_spring_preset("uniform_medium")
         return g
 
     def _jog_zero_group(self):
@@ -640,6 +664,27 @@ class Dashboard(QMainWindow):
         k = self._k_vec()
         return (round(float(k[0]), 6), round(float(k[1]), 6), round(float(k[2]), 6),
                 self.lbl_label.currentText().strip() or "custom")
+
+    def _apply_spring_preset(self, name=None):
+        """Fill + lock the k fields from the selected config-spring preset.
+
+        A recognised preset name sets ``(k_mcp, k_pip, k_dip)`` to its config
+        springs and makes the fields read-only (no stepper) so only config
+        springs can be logged. ``custom`` — or any typed label not in
+        ``SPRING_PRESETS`` — unlocks the fields for free experimentation.
+        """
+        if name is None:
+            name = self.lbl_label.currentText()
+        vals = SPRING_PRESETS.get(str(name).strip())
+        custom = vals is None
+        for s in (self.k1, self.k2, self.k3):
+            s.setReadOnly(not custom)
+            s.setButtonSymbols(QAbstractSpinBox.UpDownArrows if custom
+                               else QAbstractSpinBox.NoButtons)
+        if not custom:
+            for s, v in zip((self.k1, self.k2, self.k3), vals):
+                s.setValue(float(v))
+        self._refresh_spring_readout()
 
     def _refresh_spring_readout(self):
         k = self._k_vec()
